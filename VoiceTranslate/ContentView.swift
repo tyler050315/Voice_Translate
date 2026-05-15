@@ -44,7 +44,8 @@ private struct MainView: View {
                     apiKey: settings.apiKey,
                     baseURL: settings.baseURL,
                     language1: settings.language1,
-                    language2: settings.language2
+                    language2: settings.language2,
+                    audioFormat: settings.audioFormat
                 )
                 audioMonitor.toggleListening()
             } label: {
@@ -67,7 +68,8 @@ private struct MainView: View {
                 apiKey: settings.apiKey,
                 baseURL: settings.baseURL,
                 language1: settings.language1,
-                language2: settings.language2
+                language2: settings.language2,
+                audioFormat: settings.audioFormat
             )
         }
         .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
@@ -172,6 +174,7 @@ private struct SettingsView: View {
     @State private var language2ID = ""
     @State private var apiKey = ""
     @State private var baseURL = ""
+    @State private var audioFormatID = AudioRecordingFormat.m4aAAC.rawValue
     @State private var saveMessage = ""
     @State private var apiKeyError = ""
     @State private var baseURLError = ""
@@ -218,6 +221,18 @@ private struct SettingsView: View {
                     }
                 }
 
+                Section("Audio Format") {
+                    Picker("Recording Format", selection: $audioFormatID) {
+                        ForEach(AudioRecordingFormat.allCases) { format in
+                            Text(format.displayName).tag(format.id)
+                        }
+                    }
+
+                    Text(AudioRecordingFormat.format(for: audioFormatID).detailText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section {
                     Button {
                         saveSettings()
@@ -240,6 +255,7 @@ private struct SettingsView: View {
                 language2ID = settings.language2ID
                 apiKey = settings.apiKey
                 baseURL = settings.baseURL
+                audioFormatID = settings.audioFormatID
                 apiKeyError = ""
                 baseURLError = ""
             }
@@ -270,7 +286,8 @@ private struct SettingsView: View {
             language1ID: language1ID,
             language2ID: language2ID,
             apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            audioFormatID: audioFormatID
         )
         saveMessage = "Saved."
     }

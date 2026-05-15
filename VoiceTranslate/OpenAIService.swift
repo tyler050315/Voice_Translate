@@ -5,6 +5,7 @@ struct TranslationContext {
     let baseURL: String
     let language1: TranslationLanguage
     let language2: TranslationLanguage
+    let audioFormat: AudioRecordingFormat
 }
 
 struct TranslationResult {
@@ -27,6 +28,15 @@ enum OpenAIServiceError: LocalizedError {
         case .invalidResponse:
             return "The AI service returned an unexpected response."
         case .requestFailed(let statusCode, let message, let code):
+            if (statusCode == 400 || statusCode == 415 || statusCode == 422)
+                && Self.looksLikeAudioFormatError(message) {
+                return "The current API Base URL may not support this audio format. Try WAV Compatible in Settings."
+            }
+
+            if statusCode == 503 || message.localizedCaseInsensitiveContains("overloaded") {
+                return "The AI service is temporarily overloaded. Please try again in a moment, or switch to another API Base URL in Settings."
+            }
+
             if code == "insufficient_quota" || message.localizedCaseInsensitiveContains("quota") {
                 return "OpenAI quota exceeded. Please check the API key account's billing plan and available credits."
             }
@@ -34,6 +44,26 @@ enum OpenAIServiceError: LocalizedError {
             return "OpenAI request failed (\(statusCode)): \(message)"
         case .emptyTranscript:
             return "No speech text was recognized from the recording."
+        }
+    }
+
+    private static func looksLikeAudioFormatError(_ message: String) -> Bool {
+        let lowercasedMessage = message.lowercased()
+        return lowercasedMessage.contains("format")
+            || lowercasedMessage.contains("type")
+            || lowercasedMessage.contains("decode")
+            || lowercasedMessage.contains("m4a")
+            || lowercasedMessage.contains("audio")
+    }
+}
+
+private extension OpenAIServiceError {
+    var isRetryable: Bool {
+        switch self {
+        case .requestFailed(let statusCode, _, _):
+            return statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
+        case .missingAPIKey, .invalidResponse, .emptyTranscript:
+            return false
         }
     }
 }
@@ -79,7 +109,7 @@ final class OpenAIService {
             ],
             fileURL: audioURL,
             fileFieldName: "file",
-            mimeType: "audio/mp4"
+            mimeType: Self.mimeType(for: audioURL)
         )
 
         let data = try await send(request)
@@ -129,6 +159,28 @@ final class OpenAIService {
     }
 
     private func send(_ request: URLRequest) async throws -> Data {
+        let maxAttempts = 2
+        var lastError: OpenAIServiceError?
+
+        for attempt in 1...maxAttempts {
+            do {
+                return try await sendOnce(request)
+            } catch let error as OpenAIServiceError {
+                lastError = error
+
+                if attempt < maxAttempts, error.isRetryable {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    continue
+                }
+
+                throw error
+            }
+        }
+
+        throw lastError ?? OpenAIServiceError.invalidResponse
+    }
+
+    private func sendOnce(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAIServiceError.invalidResponse
@@ -182,6 +234,17 @@ final class OpenAIService {
         body.append("--\(boundary)--\r\n")
 
         return body
+    }
+
+    private static func mimeType(for audioURL: URL) -> String {
+        switch audioURL.pathExtension.lowercased() {
+        case "m4a":
+            return "audio/mp4"
+        case "wav":
+            return "audio/wav"
+        default:
+            return "application/octet-stream"
+        }
     }
 }
 

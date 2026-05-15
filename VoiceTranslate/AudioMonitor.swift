@@ -34,13 +34,15 @@ final class AudioMonitor: ObservableObject {
         apiKey: String,
         baseURL: String,
         language1: TranslationLanguage,
-        language2: TranslationLanguage
+        language2: TranslationLanguage,
+        audioFormat: AudioRecordingFormat
     ) {
         translationContext = TranslationContext(
             apiKey: apiKey,
             baseURL: baseURL,
             language1: language1,
-            language2: language2
+            language2: language2,
+            audioFormat: audioFormat
         )
     }
 
@@ -179,22 +181,12 @@ final class AudioMonitor: ObservableObject {
         guard !isRecording else { return }
 
         do {
+            let audioFormat = translationContext?.audioFormat ?? .m4aAAC
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("voice-utterance-\(Int(Date().timeIntervalSince1970)).m4a")
-            let settings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: recordingSampleRate,
-                AVNumberOfChannelsKey: Int(recordingChannelCount),
-                AVEncoderBitRateKey: recordingBitRate
-            ]
-            let file = try AVAudioFile(
-                forWriting: url,
-                settings: settings,
-                commonFormat: .pcmFormatFloat32,
-                interleaved: false
-            )
+                .appendingPathComponent("voice-utterance-\(Int(Date().timeIntervalSince1970)).\(audioFormat.fileExtension)")
+            let file = try makeRecordingFile(at: url, inputFormat: format, audioFormat: audioFormat)
             recordingFile = file
-            if !Self.canWriteBuffer(format, directlyTo: file.processingFormat) {
+            if audioFormat.requiresConversion, !Self.canWriteBuffer(format, directlyTo: file.processingFormat) {
                 guard let converter = AVAudioConverter(from: format, to: file.processingFormat) else {
                     throw NSError(domain: "AudioMonitor", code: 2)
                 }
@@ -233,6 +225,30 @@ final class AudioMonitor: ObservableObject {
         } catch {
             statusText = "Could not write recording."
             stopListening()
+        }
+    }
+
+    private func makeRecordingFile(
+        at url: URL,
+        inputFormat: AVAudioFormat,
+        audioFormat: AudioRecordingFormat
+    ) throws -> AVAudioFile {
+        switch audioFormat {
+        case .m4aAAC:
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: recordingSampleRate,
+                AVNumberOfChannelsKey: Int(recordingChannelCount),
+                AVEncoderBitRateKey: recordingBitRate
+            ]
+            return try AVAudioFile(
+                forWriting: url,
+                settings: settings,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
+            )
+        case .wav:
+            return try AVAudioFile(forWriting: url, settings: inputFormat.settings)
         }
     }
 

@@ -22,11 +22,59 @@ enum LanguageCatalog {
     }
 }
 
+enum AudioRecordingFormat: String, CaseIterable, Identifiable {
+    case m4aAAC = "m4a_aac"
+    case wav = "wav"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .m4aAAC:
+            return "M4A/AAC Fast"
+        case .wav:
+            return "WAV Compatible"
+        }
+    }
+
+    var detailText: String {
+        switch self {
+        case .m4aAAC:
+            return "Small upload size, 16 kHz mono, 32 kbps."
+        case .wav:
+            return "Larger upload size, best compatibility."
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .m4aAAC:
+            return "m4a"
+        case .wav:
+            return "wav"
+        }
+    }
+
+    var requiresConversion: Bool {
+        switch self {
+        case .m4aAAC:
+            return true
+        case .wav:
+            return false
+        }
+    }
+
+    static func format(for id: String) -> AudioRecordingFormat {
+        AudioRecordingFormat(rawValue: id) ?? .m4aAAC
+    }
+}
+
 final class AppSettings: ObservableObject {
     @Published var language1ID: String
     @Published var language2ID: String
     @Published var apiKey: String
     @Published var baseURL: String
+    @Published var audioFormatID: String
 
     private let defaults: UserDefaults
 
@@ -36,6 +84,7 @@ final class AppSettings: ObservableObject {
         language2ID = defaults.string(forKey: "language2") ?? "en-US"
         apiKey = defaults.string(forKey: "apiKey") ?? ""
         baseURL = defaults.string(forKey: "baseURL") ?? "https://api.whatai.cc"
+        audioFormatID = defaults.string(forKey: "audioFormat") ?? AudioRecordingFormat.m4aAAC.rawValue
     }
 
     var language1: TranslationLanguage {
@@ -46,16 +95,22 @@ final class AppSettings: ObservableObject {
         LanguageCatalog.language(for: language2ID)
     }
 
-    func save(language1ID: String, language2ID: String, apiKey: String, baseURL: String) {
+    var audioFormat: AudioRecordingFormat {
+        AudioRecordingFormat.format(for: audioFormatID)
+    }
+
+    func save(language1ID: String, language2ID: String, apiKey: String, baseURL: String, audioFormatID: String) {
         self.language1ID = language1ID
         self.language2ID = language2ID
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.audioFormatID = audioFormatID
 
         defaults.set(language1ID, forKey: "language1")
         defaults.set(language2ID, forKey: "language2")
         defaults.set(apiKey, forKey: "apiKey")
         defaults.set(baseURL, forKey: "baseURL")
+        defaults.set(audioFormatID, forKey: "audioFormat")
     }
 
     static func validateAPIKey(_ apiKey: String) -> String? {
