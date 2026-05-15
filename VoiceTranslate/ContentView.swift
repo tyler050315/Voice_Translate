@@ -40,18 +40,38 @@ private struct MainView: View {
                 Button {
                     audioMonitor.toggleListening()
                 } label: {
-                    Label(audioMonitor.isListening ? "Stop Listening" : "Start Speaking", systemImage: audioMonitor.isListening ? "stop.fill" : "mic.fill")
+                    Label(buttonTitle, systemImage: buttonIconName)
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .disabled(audioMonitor.isProcessing)
             }
             .padding(20)
             .navigationTitle("Voice Translate")
             .background(Color(.systemGroupedBackground))
+            .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
+                translatedText = result
+            }
         }
+    }
+
+    private var buttonTitle: String {
+        if audioMonitor.isProcessing {
+            return "Processing"
+        }
+
+        return audioMonitor.isListening ? "Stop Listening" : "Start Speaking"
+    }
+
+    private var buttonIconName: String {
+        if audioMonitor.isProcessing {
+            return "hourglass"
+        }
+
+        return audioMonitor.isListening ? "stop.fill" : "mic.fill"
     }
 
     private var languagePairView: some View {
