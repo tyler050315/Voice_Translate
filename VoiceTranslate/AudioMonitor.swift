@@ -20,8 +20,9 @@ final class AudioMonitor: ObservableObject {
     private var noiseFloor: Float = 0.006
     private var calibrationSampleCount = 0
     private var lastSpeechAt: Date?
-    private let minimumVoiceThreshold: Float = 0.014
-    private let speechThresholdMultiplier: Float = 2.4
+    private let minimumVoiceThreshold: Float = 0.009
+    private let farFieldVoiceThreshold: Float = 0.0065
+    private let speechThresholdMultiplier: Float = 1.9
     private let maxRecordingDuration: Duration = .seconds(30)
 
     func toggleListening() {
@@ -116,10 +117,10 @@ final class AudioMonitor: ObservableObject {
     }
 
     private func handleAudioBuffer(_ buffer: AVAudioPCMBuffer, rms: Float, format: AVAudioFormat) {
-        smoothedLevel = smoothedLevel == 0 ? rms : (smoothedLevel * 0.72 + rms * 0.28)
-        level = min(max(smoothedLevel * 18, 0), 1)
+        smoothedLevel = smoothedLevel == 0 ? rms : (smoothedLevel * 0.62 + rms * 0.38)
+        level = min(max(max(smoothedLevel, rms) * 30, 0), 1)
         let currentSpeechThreshold = speechThreshold
-        let detected = smoothedLevel > currentSpeechThreshold
+        let detected = smoothedLevel > currentSpeechThreshold || rms > farFieldTriggerThreshold
 
         if detected {
             isVoiceDetected = true
@@ -140,6 +141,10 @@ final class AudioMonitor: ObservableObject {
 
     private var speechThreshold: Float {
         max(minimumVoiceThreshold, noiseFloor * speechThresholdMultiplier)
+    }
+
+    private var farFieldTriggerThreshold: Float {
+        max(farFieldVoiceThreshold, noiseFloor * 1.35)
     }
 
     private func updateNoiseEstimate(with rms: Float, currentSpeechThreshold: Float) {
@@ -193,6 +198,7 @@ final class AudioMonitor: ObservableObject {
         let duration = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
         let finalNoiseFloor = noiseFloor
         let finalSpeechThreshold = speechThreshold
+        let finalFarFieldThreshold = farFieldTriggerThreshold
         maxDurationTask?.cancel()
         maxDurationTask = nil
         engine.inputNode.removeTap(onBus: 0)
@@ -217,7 +223,8 @@ final class AudioMonitor: ObservableObject {
                     duration: duration,
                     reason: reason,
                     noiseFloor: finalNoiseFloor,
-                    speechThreshold: finalSpeechThreshold
+                    speechThreshold: finalSpeechThreshold,
+                    farFieldThreshold: finalFarFieldThreshold
                 )
             }
         }
@@ -238,12 +245,14 @@ final class AudioMonitor: ObservableObject {
         duration: TimeInterval,
         reason: String,
         noiseFloor: Float,
-        speechThreshold: Float
+        speechThreshold: Float,
+        farFieldThreshold: Float
     ) {
         let fileName = url?.lastPathComponent ?? "no file"
         let roundedDuration = String(format: "%.1f", max(duration, 0))
         let roundedNoiseFloor = String(format: "%.4f", noiseFloor)
         let roundedSpeechThreshold = String(format: "%.4f", speechThreshold)
+        let roundedFarFieldThreshold = String(format: "%.4f", farFieldThreshold)
         testResultText = """
         Test capture completed.
 
@@ -251,6 +260,7 @@ final class AudioMonitor: ObservableObject {
         Stop reason: \(reason)
         Noise floor: \(roundedNoiseFloor)
         Speech threshold: \(roundedSpeechThreshold)
+        Far-field threshold: \(roundedFarFieldThreshold)
         Audio file: \(fileName)
 
         Next step: send this audio clip to the AI API for speech recognition and translation.
