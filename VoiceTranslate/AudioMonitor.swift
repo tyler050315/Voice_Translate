@@ -307,7 +307,7 @@ final class AudioMonitor: ObservableObject {
     private func completeErrorResult(_ error: Error) {
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         testResultText = """
-        Translation failed.
+        Translation failed
 
         \(message)
         """

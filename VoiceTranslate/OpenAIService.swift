@@ -16,7 +16,7 @@ struct TranslationResult {
 enum OpenAIServiceError: LocalizedError {
     case missingAPIKey
     case invalidResponse
-    case requestFailed(String)
+    case requestFailed(statusCode: Int, message: String, code: String?)
     case emptyTranscript
 
     var errorDescription: String? {
@@ -25,8 +25,12 @@ enum OpenAIServiceError: LocalizedError {
             return "Please enter and save your AI API key in Settings."
         case .invalidResponse:
             return "The AI service returned an unexpected response."
-        case .requestFailed(let message):
-            return message
+        case .requestFailed(let statusCode, let message, let code):
+            if code == "insufficient_quota" || message.localizedCaseInsensitiveContains("quota") {
+                return "OpenAI quota exceeded. Please check the API key account's billing plan and available credits."
+            }
+
+            return "OpenAI request failed (\(statusCode)): \(message)"
         case .emptyTranscript:
             return "No speech text was recognized from the recording."
         }
@@ -123,8 +127,16 @@ final class OpenAIService {
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "Request failed with status \(httpResponse.statusCode)."
-            throw OpenAIServiceError.requestFailed(message)
+            if let apiError = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data) {
+                throw OpenAIServiceError.requestFailed(
+                    statusCode: httpResponse.statusCode,
+                    message: apiError.error.message,
+                    code: apiError.error.code
+                )
+            }
+
+            let message = String(data: data, encoding: .utf8) ?? "Request failed."
+            throw OpenAIServiceError.requestFailed(statusCode: httpResponse.statusCode, message: message, code: nil)
         }
 
         return data
@@ -205,6 +217,16 @@ private struct TranslationPayload: Decodable {
         case sourceLanguage = "source_language"
         case targetLanguage = "target_language"
         case translation
+    }
+}
+
+private struct OpenAIErrorResponse: Decodable {
+    let error: APIError
+
+    struct APIError: Decodable {
+        let message: String
+        let type: String?
+        let code: String?
     }
 }
 
