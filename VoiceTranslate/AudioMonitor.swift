@@ -12,13 +12,19 @@ final class AudioMonitor: ObservableObject {
     @Published var testResultText: String?
 
     private let engine = AVAudioEngine()
-    private var silenceTask: Task<Void, Never>?
     private var maxDurationTask: Task<Void, Never>?
     private var recordingFile: AVAudioFile?
     private var recordingURL: URL?
     private var recordingStartedAt: Date?
-    private let voiceThreshold: Float = 0.018
-    private let silenceTimeout: Duration = .milliseconds(1_200)
+    private var smoothedLevel: Float = 0
+    private var noiseFloor: Float = 0.006
+    private var calibrationSampleCount = 0
+    private var quietStartedAt: Date?
+    private var lastSpeechAt: Date?
+    private let minimumVoiceThreshold: Float = 0.022
+    private let speechThresholdMultiplier: Float = 3.2
+    private let silenceTimeout: TimeInterval = 1.5
+    private let minimumRecordingDuration: TimeInterval = 0.8
     private let maxRecordingDuration: Duration = .seconds(15)
 
     func toggleListening() {
@@ -50,8 +56,6 @@ final class AudioMonitor: ObservableObject {
     }
 
     func stopListening() {
-        silenceTask?.cancel()
-        silenceTask = nil
         maxDurationTask?.cancel()
         maxDurationTask = nil
         engine.inputNode.removeTap(onBus: 0)
@@ -64,6 +68,7 @@ final class AudioMonitor: ObservableObject {
         recordingFile = nil
         recordingURL = nil
         recordingStartedAt = nil
+        resetVoiceDetectionState()
         statusText = "Tap the voice button to start."
     }
 
@@ -88,6 +93,7 @@ final class AudioMonitor: ObservableObject {
             isListening = true
             isProcessing = false
             testResultText = nil
+            resetVoiceDetectionState()
             statusText = "Listening for speech..."
         } catch {
             statusText = "Could not start microphone."
@@ -97,23 +103,36 @@ final class AudioMonitor: ObservableObject {
     }
 
     private func handleAudioBuffer(_ buffer: AVAudioPCMBuffer, rms: Float, format: AVAudioFormat) {
-        level = min(max(rms * 18, 0), 1)
-        let detected = rms > voiceThreshold
+        updateNoiseEstimate(with: rms)
+        smoothedLevel = smoothedLevel == 0 ? rms : (smoothedLevel * 0.72 + rms * 0.28)
+        level = min(max(smoothedLevel * 18, 0), 1)
+        let detected = smoothedLevel > speechThreshold
 
         if detected {
             isVoiceDetected = true
+            quietStartedAt = nil
+            lastSpeechAt = Date()
             startRecordingIfNeeded(format: format)
             writeBuffer(buffer)
-            silenceTask?.cancel()
-            silenceTask = nil
             statusText = "Recording..."
         } else if isRecording {
             writeBuffer(buffer)
-            scheduleFinishAfterSilence()
+            handleQuietRecordingFrame()
         } else if isListening {
             isVoiceDetected = false
             statusText = "Listening for speech..."
         }
+    }
+
+    private var speechThreshold: Float {
+        max(minimumVoiceThreshold, noiseFloor * speechThresholdMultiplier)
+    }
+
+    private func updateNoiseEstimate(with rms: Float) {
+        guard !isRecording, calibrationSampleCount < 40 else { return }
+
+        calibrationSampleCount += 1
+        noiseFloor = noiseFloor * 0.9 + rms * 0.1
     }
 
     private func startRecordingIfNeeded(format: AVAudioFormat) {
@@ -125,6 +144,7 @@ final class AudioMonitor: ObservableObject {
             recordingFile = try AVAudioFile(forWriting: url, settings: format.settings)
             recordingURL = url
             recordingStartedAt = Date()
+            lastSpeechAt = Date()
             isRecording = true
             isVoiceDetected = true
 
@@ -151,16 +171,25 @@ final class AudioMonitor: ObservableObject {
         }
     }
 
-    private func scheduleFinishAfterSilence() {
-        guard silenceTask == nil else { return }
+    private func handleQuietRecordingFrame() {
+        let now = Date()
+        if quietStartedAt == nil {
+            quietStartedAt = now
+        }
+
+        let quietDuration = now.timeIntervalSince(quietStartedAt ?? now)
+        let recordingDuration = recordingStartedAt.map { now.timeIntervalSince($0) } ?? 0
+        let speechGap = lastSpeechAt.map { now.timeIntervalSince($0) } ?? 0
+        guard quietDuration >= silenceTimeout,
+              speechGap >= silenceTimeout,
+              recordingDuration >= minimumRecordingDuration else {
+            isVoiceDetected = false
+            statusText = "Recording..."
+            return
+        }
 
         isVoiceDetected = false
-        statusText = "Silence detected..."
-        let silenceTimeout = silenceTimeout
-        silenceTask = Task { [weak self] in
-            try? await Task.sleep(for: silenceTimeout)
-            await self?.finishRecording(reason: "silence detected")
-        }
+        finishRecording(reason: "silence detected")
     }
 
     private func finishRecording(reason: String) {
@@ -168,8 +197,8 @@ final class AudioMonitor: ObservableObject {
 
         let finishedURL = recordingURL
         let duration = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-        silenceTask?.cancel()
-        silenceTask = nil
+        let finalNoiseFloor = noiseFloor
+        let finalSpeechThreshold = speechThreshold
         maxDurationTask?.cancel()
         maxDurationTask = nil
         engine.inputNode.removeTap(onBus: 0)
@@ -177,6 +206,8 @@ final class AudioMonitor: ObservableObject {
         recordingFile = nil
         recordingURL = nil
         recordingStartedAt = nil
+        quietStartedAt = nil
+        lastSpeechAt = nil
         isListening = false
         isRecording = false
         isVoiceDetected = false
@@ -187,25 +218,49 @@ final class AudioMonitor: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(450))
             await MainActor.run {
-                self?.completeTestResult(url: finishedURL, duration: duration, reason: reason)
+                self?.completeTestResult(
+                    url: finishedURL,
+                    duration: duration,
+                    reason: reason,
+                    noiseFloor: finalNoiseFloor,
+                    speechThreshold: finalSpeechThreshold
+                )
             }
         }
     }
 
-    private func completeTestResult(url: URL?, duration: TimeInterval, reason: String) {
+    private func completeTestResult(
+        url: URL?,
+        duration: TimeInterval,
+        reason: String,
+        noiseFloor: Float,
+        speechThreshold: Float
+    ) {
         let fileName = url?.lastPathComponent ?? "no file"
         let roundedDuration = String(format: "%.1f", max(duration, 0))
+        let roundedNoiseFloor = String(format: "%.4f", noiseFloor)
+        let roundedSpeechThreshold = String(format: "%.4f", speechThreshold)
         testResultText = """
         Test capture completed.
 
         Recording duration: \(roundedDuration)s
         Stop reason: \(reason)
+        Noise floor: \(roundedNoiseFloor)
+        Speech threshold: \(roundedSpeechThreshold)
         Audio file: \(fileName)
 
         Next step: send this audio clip to the AI API for speech recognition and translation.
         """
         isProcessing = false
         statusText = "Tap the voice button to start."
+    }
+
+    private func resetVoiceDetectionState() {
+        smoothedLevel = 0
+        noiseFloor = 0.006
+        calibrationSampleCount = 0
+        quietStartedAt = nil
+        lastSpeechAt = nil
     }
 
     nonisolated private static func rootMeanSquarePower(from buffer: AVAudioPCMBuffer) -> Float {
