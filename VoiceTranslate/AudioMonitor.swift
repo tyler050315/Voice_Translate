@@ -19,13 +19,10 @@ final class AudioMonitor: ObservableObject {
     private var smoothedLevel: Float = 0
     private var noiseFloor: Float = 0.006
     private var calibrationSampleCount = 0
-    private var quietStartedAt: Date?
     private var lastSpeechAt: Date?
     private let minimumVoiceThreshold: Float = 0.022
     private let speechThresholdMultiplier: Float = 3.2
-    private let silenceTimeout: TimeInterval = 1.5
-    private let minimumRecordingDuration: TimeInterval = 0.8
-    private let maxRecordingDuration: Duration = .seconds(15)
+    private let maxRecordingDuration: Duration = .seconds(30)
 
     func toggleListening() {
         isListening ? stopListening() : startListening()
@@ -56,6 +53,21 @@ final class AudioMonitor: ObservableObject {
     }
 
     func stopListening() {
+        if isRecording {
+            finishRecording(reason: "manually finished")
+            return
+        }
+
+        if isListening {
+            finishWithoutRecording()
+            return
+        }
+
+        resetAudioState()
+        statusText = "Tap the voice button to start."
+    }
+
+    private func resetAudioState() {
         maxDurationTask?.cancel()
         maxDurationTask = nil
         engine.inputNode.removeTap(onBus: 0)
@@ -69,7 +81,6 @@ final class AudioMonitor: ObservableObject {
         recordingURL = nil
         recordingStartedAt = nil
         resetVoiceDetectionState()
-        statusText = "Tap the voice button to start."
     }
 
     private func configureAndStartEngine() {
@@ -110,14 +121,14 @@ final class AudioMonitor: ObservableObject {
 
         if detected {
             isVoiceDetected = true
-            quietStartedAt = nil
             lastSpeechAt = Date()
             startRecordingIfNeeded(format: format)
             writeBuffer(buffer)
             statusText = "Recording..."
         } else if isRecording {
             writeBuffer(buffer)
-            handleQuietRecordingFrame()
+            isVoiceDetected = false
+            statusText = "Recording..."
         } else if isListening {
             isVoiceDetected = false
             statusText = "Listening for speech..."
@@ -171,27 +182,6 @@ final class AudioMonitor: ObservableObject {
         }
     }
 
-    private func handleQuietRecordingFrame() {
-        let now = Date()
-        if quietStartedAt == nil {
-            quietStartedAt = now
-        }
-
-        let quietDuration = now.timeIntervalSince(quietStartedAt ?? now)
-        let recordingDuration = recordingStartedAt.map { now.timeIntervalSince($0) } ?? 0
-        let speechGap = lastSpeechAt.map { now.timeIntervalSince($0) } ?? 0
-        guard quietDuration >= silenceTimeout,
-              speechGap >= silenceTimeout,
-              recordingDuration >= minimumRecordingDuration else {
-            isVoiceDetected = false
-            statusText = "Recording..."
-            return
-        }
-
-        isVoiceDetected = false
-        finishRecording(reason: "silence detected")
-    }
-
     private func finishRecording(reason: String) {
         guard isRecording else { return }
 
@@ -206,7 +196,6 @@ final class AudioMonitor: ObservableObject {
         recordingFile = nil
         recordingURL = nil
         recordingStartedAt = nil
-        quietStartedAt = nil
         lastSpeechAt = nil
         isListening = false
         isRecording = false
@@ -227,6 +216,16 @@ final class AudioMonitor: ObservableObject {
                 )
             }
         }
+    }
+
+    private func finishWithoutRecording() {
+        resetAudioState()
+        testResultText = """
+        No speech was captured.
+
+        Tap Start Speaking, begin talking, then tap Finish Recording when you are done.
+        """
+        statusText = "Tap the voice button to start."
     }
 
     private func completeTestResult(
@@ -259,7 +258,6 @@ final class AudioMonitor: ObservableObject {
         smoothedLevel = 0
         noiseFloor = 0.006
         calibrationSampleCount = 0
-        quietStartedAt = nil
         lastSpeechAt = nil
     }
 

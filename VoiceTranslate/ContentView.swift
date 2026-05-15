@@ -63,7 +63,11 @@ private struct MainView: View {
             return "Processing"
         }
 
-        return audioMonitor.isListening ? "Stop Listening" : "Start Speaking"
+        if audioMonitor.isRecording {
+            return "Finish Recording"
+        }
+
+        return audioMonitor.isListening ? "Cancel Listening" : "Start Speaking"
     }
 
     private var buttonIconName: String {
