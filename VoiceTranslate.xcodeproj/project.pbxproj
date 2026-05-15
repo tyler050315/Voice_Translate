@@ -12,6 +12,7 @@
 		0A8D1B2E2C8F4D0A00A10001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8D1B2D2C8F4D0A00A10001 /* AppSettings.swift */; };
 		0A8D1B302C8F4D0A00A10001 /* AudioMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8D1B2F2C8F4D0A00A10001 /* AudioMonitor.swift */; };
 		0A8D1B372C8F4D0A00A10001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0A8D1B362C8F4D0A00A10001 /* Assets.xcassets */; };
+		0A8D1B392C8F4D0A00A10001 /* OpenAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8D1B382C8F4D0A00A10001 /* OpenAIService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,7 @@
 		0A8D1B2D2C8F4D0A00A10001 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		0A8D1B2F2C8F4D0A00A10001 /* AudioMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMonitor.swift; sourceTree = "<group>"; };
 		0A8D1B362C8F4D0A00A10001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0A8D1B382C8F4D0A00A10001 /* OpenAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +59,7 @@
 				0A8D1B2B2C8F4D0A00A10001 /* ContentView.swift */,
 				0A8D1B2D2C8F4D0A00A10001 /* AppSettings.swift */,
 				0A8D1B2F2C8F4D0A00A10001 /* AudioMonitor.swift */,
+				0A8D1B382C8F4D0A00A10001 /* OpenAIService.swift */,
 				0A8D1B362C8F4D0A00A10001 /* Assets.xcassets */,
 			);
 			path = VoiceTranslate;
@@ -132,6 +135,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A8D1B302C8F4D0A00A10001 /* AudioMonitor.swift in Sources */,
+				0A8D1B392C8F4D0A00A10001 /* OpenAIService.swift in Sources */,
 				0A8D1B2E2C8F4D0A00A10001 /* AppSettings.swift in Sources */,
 				0A8D1B2C2C8F4D0A00A10001 /* ContentView.swift in Sources */,
 				0A8D1B2A2C8F4D0A00A10001 /* VoiceTranslateApp.swift in Sources */,

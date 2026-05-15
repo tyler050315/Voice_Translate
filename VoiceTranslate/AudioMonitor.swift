@@ -16,6 +16,7 @@ final class AudioMonitor: ObservableObject {
     private var recordingFile: AVAudioFile?
     private var recordingURL: URL?
     private var recordingStartedAt: Date?
+    private var translationContext: TranslationContext?
     private var smoothedLevel: Float = 0
     private var noiseFloor: Float = 0.006
     private var calibrationSampleCount = 0
@@ -24,6 +25,10 @@ final class AudioMonitor: ObservableObject {
     private let farFieldVoiceThreshold: Float = 0.0065
     private let speechThresholdMultiplier: Float = 1.9
     private let maxRecordingDuration: Duration = .seconds(30)
+
+    func updateTranslationContext(_ context: TranslationContext) {
+        translationContext = context
+    }
 
     func toggleListening() {
         isListening ? stopListening() : startListening()
@@ -160,7 +165,7 @@ final class AudioMonitor: ObservableObject {
 
         do {
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("voice-utterance-\(Int(Date().timeIntervalSince1970)).caf")
+                .appendingPathComponent("voice-utterance-\(Int(Date().timeIntervalSince1970)).wav")
             recordingFile = try AVAudioFile(forWriting: url, settings: format.settings)
             recordingURL = url
             recordingStartedAt = Date()
@@ -218,14 +223,59 @@ final class AudioMonitor: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(450))
             await MainActor.run {
-                self?.completeTestResult(
-                    url: finishedURL,
+                self?.statusText = "Translating..."
+            }
+
+            await self?.translateFinishedRecording(
+                url: finishedURL,
+                duration: duration,
+                reason: reason,
+                noiseFloor: finalNoiseFloor,
+                speechThreshold: finalSpeechThreshold,
+                farFieldThreshold: finalFarFieldThreshold
+            )
+        }
+    }
+
+    private func translateFinishedRecording(
+        url: URL?,
+        duration: TimeInterval,
+        reason: String,
+        noiseFloor: Float,
+        speechThreshold: Float,
+        farFieldThreshold: Float
+    ) async {
+        guard let url else {
+            await MainActor.run {
+                completeTestResult(
+                    url: nil,
                     duration: duration,
                     reason: reason,
-                    noiseFloor: finalNoiseFloor,
-                    speechThreshold: finalSpeechThreshold,
-                    farFieldThreshold: finalFarFieldThreshold
+                    noiseFloor: noiseFloor,
+                    speechThreshold: speechThreshold,
+                    farFieldThreshold: farFieldThreshold
                 )
+            }
+            return
+        }
+
+        guard let context = translationContext else {
+            await MainActor.run {
+                testResultText = "Missing translation settings."
+                isProcessing = false
+                statusText = "Tap the voice button to start."
+            }
+            return
+        }
+
+        do {
+            let result = try await OpenAIService(apiKey: context.apiKey).translateAudio(at: url, context: context)
+            await MainActor.run {
+                completeTranslationResult(result)
+            }
+        } catch {
+            await MainActor.run {
+                completeErrorResult(error)
             }
         }
     }
@@ -237,6 +287,31 @@ final class AudioMonitor: ObservableObject {
 
         Tap Start Speaking, begin talking, then tap Finish Recording when you are done.
         """
+        statusText = "Tap the voice button to start."
+    }
+
+    private func completeTranslationResult(_ result: TranslationResult) {
+        testResultText = """
+        \(result.translatedText)
+
+        Source: \(result.sourceLanguage)
+        Target: \(result.targetLanguage)
+
+        Original:
+        \(result.transcript)
+        """
+        isProcessing = false
+        statusText = "Tap the voice button to start."
+    }
+
+    private func completeErrorResult(_ error: Error) {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        testResultText = """
+        Translation failed.
+
+        \(message)
+        """
+        isProcessing = false
         statusText = "Tap the voice button to start."
     }
 

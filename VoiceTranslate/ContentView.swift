@@ -38,6 +38,7 @@ private struct MainView: View {
                     .frame(height: 22)
 
                 Button {
+                    updateTranslationContext()
                     audioMonitor.toggleListening()
                 } label: {
                     Label(buttonTitle, systemImage: buttonIconName)
@@ -52,6 +53,9 @@ private struct MainView: View {
             .padding(20)
             .navigationTitle("Voice Translate")
             .background(Color(.systemGroupedBackground))
+            .onAppear {
+                updateTranslationContext()
+            }
             .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
                 translatedText = result
             }
@@ -76,6 +80,16 @@ private struct MainView: View {
         }
 
         return audioMonitor.isListening ? "stop.fill" : "mic.fill"
+    }
+
+    private func updateTranslationContext() {
+        audioMonitor.updateTranslationContext(
+            TranslationContext(
+                apiKey: settings.apiKey,
+                language1: settings.language1,
+                language2: settings.language2
+            )
+        )
     }
 
     private var languagePairView: some View {
