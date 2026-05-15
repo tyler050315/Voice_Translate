@@ -15,6 +15,7 @@ workflows:
             -scheme "$XCODE_SCHEME" \
             -sdk iphonesimulator \
             -configuration Debug \
+            -arch arm64 \
             build
       - name: Build IPA
         script: |

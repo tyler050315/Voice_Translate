@@ -26,8 +26,8 @@ final class AudioMonitor: ObservableObject {
     private let speechThresholdMultiplier: Float = 1.9
     private let maxRecordingDuration: Duration = .seconds(30)
 
-    func updateTranslationContext(_ context: TranslationContext) {
-        translationContext = context
+    func updateTranslationSettings(apiKey: String, language1: TranslationLanguage, language2: TranslationLanguage) {
+        translationContext = TranslationContext(apiKey: apiKey, language1: language1, language2: language2)
     }
 
     func toggleListening() {
