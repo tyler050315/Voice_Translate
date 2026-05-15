@@ -53,4 +53,26 @@ final class AppSettings: ObservableObject {
         defaults.set(language2ID, forKey: "language2")
         defaults.set(apiKey, forKey: "apiKey")
     }
+
+    static func validateAPIKey(_ apiKey: String) -> String? {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.isEmpty {
+            return "Please enter an API key."
+        }
+
+        if trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+            return "API key cannot contain spaces or line breaks."
+        }
+
+        if !trimmed.hasPrefix("sk-") {
+            return "API key should start with sk-."
+        }
+
+        if trimmed.count < 20 {
+            return "API key looks too short."
+        }
+
+        return nil
+    }
 }

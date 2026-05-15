@@ -159,6 +159,7 @@ private struct SettingsView: View {
     @State private var language2ID = ""
     @State private var apiKey = ""
     @State private var saveMessage = ""
+    @State private var apiKeyError = ""
 
     var body: some View {
         NavigationStack {
@@ -181,6 +182,12 @@ private struct SettingsView: View {
                     SecureField("Enter API key", text: $apiKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+
+                    if !apiKeyError.isEmpty {
+                        Text(apiKeyError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 Section {
@@ -195,7 +202,7 @@ private struct SettingsView: View {
                     if !saveMessage.isEmpty {
                         Text(saveMessage)
                             .font(.footnote)
-                            .foregroundStyle(language1ID == language2ID ? .red : .secondary)
+                            .foregroundStyle(saveMessage == "Saved." ? .secondary : .red)
                     }
                 }
             }
@@ -204,6 +211,7 @@ private struct SettingsView: View {
                 language1ID = settings.language1ID
                 language2ID = settings.language2ID
                 apiKey = settings.apiKey
+                apiKeyError = ""
             }
         }
     }
@@ -214,6 +222,13 @@ private struct SettingsView: View {
             return
         }
 
+        if let validationError = AppSettings.validateAPIKey(apiKey) {
+            apiKeyError = validationError
+            saveMessage = validationError
+            return
+        }
+
+        apiKeyError = ""
         settings.save(
             language1ID: language1ID,
             language2ID: language2ID,
