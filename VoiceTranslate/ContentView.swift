@@ -25,51 +25,53 @@ private struct MainView: View {
     @State private var translatedText = "Translation text will appear here after speech is processed."
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 22) {
-                languagePairView
+        VStack(spacing: 12) {
+            titleView
 
-                translatedTextBox
+            languagePairView
 
-                microphoneIndicator
+            translatedTextBox
 
-                Text(audioMonitor.statusText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(height: 22)
+            microphoneIndicator
 
-                Button {
-                    audioMonitor.updateTranslationSettings(
-                        apiKey: settings.apiKey,
-                        baseURL: settings.baseURL,
-                        language1: settings.language1,
-                        language2: settings.language2
-                    )
-                    audioMonitor.toggleListening()
-                } label: {
-                    Label(buttonTitle, systemImage: buttonIconName)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(audioMonitor.isProcessing)
-            }
-            .padding(20)
-            .navigationTitle("Voice Translate")
-            .background(Color(.systemGroupedBackground))
-            .onAppear {
+            Text(audioMonitor.statusText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(height: 18)
+
+            Button {
                 audioMonitor.updateTranslationSettings(
                     apiKey: settings.apiKey,
                     baseURL: settings.baseURL,
                     language1: settings.language1,
                     language2: settings.language2
                 )
+                audioMonitor.toggleListening()
+            } label: {
+                Label(buttonTitle, systemImage: buttonIconName)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
             }
-            .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
-                translatedText = result
-            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .disabled(audioMonitor.isProcessing)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(.systemGroupedBackground))
+        .onAppear {
+            audioMonitor.updateTranslationSettings(
+                apiKey: settings.apiKey,
+                baseURL: settings.baseURL,
+                language1: settings.language1,
+                language2: settings.language2
+            )
+        }
+        .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
+            translatedText = result
         }
     }
 
@@ -93,6 +95,15 @@ private struct MainView: View {
         return audioMonitor.isListening ? "stop.fill" : "mic.fill"
     }
 
+    private var titleView: some View {
+        Text("Voice Translate")
+            .font(.custom("HelveticaNeue-CondensedBlack", size: 22, relativeTo: .title3))
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
+    }
+
     private var languagePairView: some View {
         HStack(spacing: 10) {
             languageBadge(settings.language1)
@@ -113,7 +124,7 @@ private struct MainView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
@@ -126,25 +137,26 @@ private struct MainView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(18)
         }
-        .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color(.separator), lineWidth: 0.5)
         }
+        .layoutPriority(1)
     }
 
     private var microphoneIndicator: some View {
         ZStack {
             Circle()
                 .fill(audioMonitor.isVoiceDetected ? Color.green.opacity(0.2) : Color(.tertiarySystemFill))
-                .frame(width: 110, height: 110)
+                .frame(width: 54, height: 54)
                 .scaleEffect(audioMonitor.isVoiceDetected ? 1.12 : 1)
                 .animation(.easeInOut(duration: 0.22).repeatCount(audioMonitor.isVoiceDetected ? 2 : 1, autoreverses: true), value: audioMonitor.isVoiceDetected)
 
             Image(systemName: "mic.fill")
-                .font(.system(size: 46, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(audioMonitor.isListening ? Color.accentColor : Color.secondary)
                 .opacity(audioMonitor.isVoiceDetected ? 0.35 + Double(audioMonitor.level) * 0.65 : 0.65)
                 .scaleEffect(audioMonitor.isVoiceDetected ? 1.08 : 1)

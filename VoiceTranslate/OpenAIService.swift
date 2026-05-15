@@ -79,7 +79,7 @@ final class OpenAIService {
             ],
             fileURL: audioURL,
             fileFieldName: "file",
-            mimeType: "audio/wav"
+            mimeType: "audio/mp4"
         )
 
         let data = try await send(request)
