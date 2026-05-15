@@ -20,8 +20,8 @@ final class AudioMonitor: ObservableObject {
     private var noiseFloor: Float = 0.006
     private var calibrationSampleCount = 0
     private var lastSpeechAt: Date?
-    private let minimumVoiceThreshold: Float = 0.022
-    private let speechThresholdMultiplier: Float = 3.2
+    private let minimumVoiceThreshold: Float = 0.014
+    private let speechThresholdMultiplier: Float = 2.4
     private let maxRecordingDuration: Duration = .seconds(30)
 
     func toggleListening() {
@@ -72,6 +72,7 @@ final class AudioMonitor: ObservableObject {
         maxDurationTask = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        engine.reset()
         isListening = false
         isRecording = false
         isProcessing = false
@@ -88,6 +89,7 @@ final class AudioMonitor: ObservableObject {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
+            engine.reset()
 
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
@@ -114,10 +116,10 @@ final class AudioMonitor: ObservableObject {
     }
 
     private func handleAudioBuffer(_ buffer: AVAudioPCMBuffer, rms: Float, format: AVAudioFormat) {
-        updateNoiseEstimate(with: rms)
         smoothedLevel = smoothedLevel == 0 ? rms : (smoothedLevel * 0.72 + rms * 0.28)
         level = min(max(smoothedLevel * 18, 0), 1)
-        let detected = smoothedLevel > speechThreshold
+        let currentSpeechThreshold = speechThreshold
+        let detected = smoothedLevel > currentSpeechThreshold
 
         if detected {
             isVoiceDetected = true
@@ -130,6 +132,7 @@ final class AudioMonitor: ObservableObject {
             isVoiceDetected = false
             statusText = "Recording..."
         } else if isListening {
+            updateNoiseEstimate(with: rms, currentSpeechThreshold: currentSpeechThreshold)
             isVoiceDetected = false
             statusText = "Listening for speech..."
         }
@@ -139,8 +142,9 @@ final class AudioMonitor: ObservableObject {
         max(minimumVoiceThreshold, noiseFloor * speechThresholdMultiplier)
     }
 
-    private func updateNoiseEstimate(with rms: Float) {
+    private func updateNoiseEstimate(with rms: Float, currentSpeechThreshold: Float) {
         guard !isRecording, calibrationSampleCount < 40 else { return }
+        guard rms < currentSpeechThreshold * 0.75 else { return }
 
         calibrationSampleCount += 1
         noiseFloor = noiseFloor * 0.9 + rms * 0.1
@@ -193,6 +197,7 @@ final class AudioMonitor: ObservableObject {
         maxDurationTask = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        engine.reset()
         recordingFile = nil
         recordingURL = nil
         recordingStartedAt = nil
