@@ -18,9 +18,28 @@ workflows:
             build
       - name: Build IPA
         script: |
-          xcode-project build-ipa \
-            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+          xcodebuild \
+            -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_PATH=$(find "$CM_BUILD_DIR/build/DerivedData/Build/Products/Release-iphoneos" -maxdepth 1 -name "*.app" -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app was produced"
+            exit 1
+          fi
+
+          rm -rf "$CM_BUILD_DIR/build/ios/ipa/Payload"
+          mkdir -p "$CM_BUILD_DIR/build/ios/ipa/Payload"
+          cp -R "$APP_PATH" "$CM_BUILD_DIR/build/ios/ipa/Payload/"
+          cd "$CM_BUILD_DIR/build/ios/ipa"
+          zip -qry VoiceTranslate-unsigned.ipa Payload
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
