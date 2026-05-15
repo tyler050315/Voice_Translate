@@ -2,6 +2,7 @@ import Foundation
 
 struct TranslationContext {
     let apiKey: String
+    let baseURL: String
     let language1: TranslationLanguage
     let language2: TranslationLanguage
 }
@@ -39,10 +40,17 @@ enum OpenAIServiceError: LocalizedError {
 
 final class OpenAIService {
     private let apiKey: String
+    private let baseURL: URL
     private let session: URLSession
 
-    init(apiKey: String, session: URLSession = .shared) {
+    init(apiKey: String, baseURL: String, session: URLSession = .shared) throws {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: trimmedBaseURL) else {
+            throw OpenAIServiceError.invalidResponse
+        }
+        self.baseURL = url
         self.session = session
     }
 
@@ -59,7 +67,7 @@ final class OpenAIService {
 
     private func transcribeAudio(at audioURL: URL) async throws -> String {
         let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
+        var request = URLRequest(url: endpoint("/v1/audio/transcriptions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -80,7 +88,7 @@ final class OpenAIService {
     }
 
     private func translateTranscript(_ transcript: String, context: TranslationContext) async throws -> TranslationResult {
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        var request = URLRequest(url: endpoint("/v1/chat/completions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -95,7 +103,7 @@ final class OpenAIService {
         """
 
         let payload = ChatCompletionRequest(
-            model: "gpt-4.1-mini",
+            model: "gpt-5.5",
             temperature: 0,
             responseFormat: ResponseFormat(type: "json_object"),
             messages: [
@@ -140,6 +148,14 @@ final class OpenAIService {
         }
 
         return data
+    }
+
+    private func endpoint(_ path: String) -> URL {
+        path
+            .split(separator: "/")
+            .reduce(baseURL) { partialURL, component in
+                partialURL.appendingPathComponent(String(component))
+            }
     }
 
     private func makeMultipartBody(

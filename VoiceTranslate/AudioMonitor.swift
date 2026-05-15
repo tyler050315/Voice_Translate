@@ -26,8 +26,18 @@ final class AudioMonitor: ObservableObject {
     private let speechThresholdMultiplier: Float = 1.9
     private let maxRecordingDuration: Duration = .seconds(30)
 
-    func updateTranslationSettings(apiKey: String, language1: TranslationLanguage, language2: TranslationLanguage) {
-        translationContext = TranslationContext(apiKey: apiKey, language1: language1, language2: language2)
+    func updateTranslationSettings(
+        apiKey: String,
+        baseURL: String,
+        language1: TranslationLanguage,
+        language2: TranslationLanguage
+    ) {
+        translationContext = TranslationContext(
+            apiKey: apiKey,
+            baseURL: baseURL,
+            language1: language1,
+            language2: language2
+        )
     }
 
     func toggleListening() {
@@ -269,7 +279,8 @@ final class AudioMonitor: ObservableObject {
         }
 
         do {
-            let result = try await OpenAIService(apiKey: context.apiKey).translateAudio(at: url, context: context)
+            let service = try OpenAIService(apiKey: context.apiKey, baseURL: context.baseURL)
+            let result = try await service.translateAudio(at: url, context: context)
             await MainActor.run {
                 completeTranslationResult(result)
             }

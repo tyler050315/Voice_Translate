@@ -26,6 +26,7 @@ final class AppSettings: ObservableObject {
     @Published var language1ID: String
     @Published var language2ID: String
     @Published var apiKey: String
+    @Published var baseURL: String
 
     private let defaults: UserDefaults
 
@@ -34,6 +35,7 @@ final class AppSettings: ObservableObject {
         language1ID = defaults.string(forKey: "language1") ?? "zh-CN"
         language2ID = defaults.string(forKey: "language2") ?? "en-US"
         apiKey = defaults.string(forKey: "apiKey") ?? ""
+        baseURL = defaults.string(forKey: "baseURL") ?? "https://api.whatai.cc"
     }
 
     var language1: TranslationLanguage {
@@ -44,14 +46,16 @@ final class AppSettings: ObservableObject {
         LanguageCatalog.language(for: language2ID)
     }
 
-    func save(language1ID: String, language2ID: String, apiKey: String) {
+    func save(language1ID: String, language2ID: String, apiKey: String, baseURL: String) {
         self.language1ID = language1ID
         self.language2ID = language2ID
         self.apiKey = apiKey
+        self.baseURL = baseURL
 
         defaults.set(language1ID, forKey: "language1")
         defaults.set(language2ID, forKey: "language2")
         defaults.set(apiKey, forKey: "apiKey")
+        defaults.set(baseURL, forKey: "baseURL")
     }
 
     static func validateAPIKey(_ apiKey: String) -> String? {
@@ -65,12 +69,25 @@ final class AppSettings: ObservableObject {
             return "API key cannot contain spaces or line breaks."
         }
 
-        if !trimmed.hasPrefix("sk-") {
-            return "API key should start with sk-."
+        if trimmed.count < 8 {
+            return "API key looks too short."
         }
 
-        if trimmed.count < 20 {
-            return "API key looks too short."
+        return nil
+    }
+
+    static func validateBaseURL(_ baseURL: String) -> String? {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.isEmpty {
+            return "Please enter a Base URL."
+        }
+
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https",
+              url.host != nil else {
+            return "Base URL must be a valid https URL."
         }
 
         return nil

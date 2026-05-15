@@ -41,6 +41,7 @@ private struct MainView: View {
                 Button {
                     audioMonitor.updateTranslationSettings(
                         apiKey: settings.apiKey,
+                        baseURL: settings.baseURL,
                         language1: settings.language1,
                         language2: settings.language2
                     )
@@ -61,6 +62,7 @@ private struct MainView: View {
             .onAppear {
                 audioMonitor.updateTranslationSettings(
                     apiKey: settings.apiKey,
+                    baseURL: settings.baseURL,
                     language1: settings.language1,
                     language2: settings.language2
                 )
@@ -157,8 +159,10 @@ private struct SettingsView: View {
     @State private var language1ID = ""
     @State private var language2ID = ""
     @State private var apiKey = ""
+    @State private var baseURL = ""
     @State private var saveMessage = ""
     @State private var apiKeyError = ""
+    @State private var baseURLError = ""
 
     var body: some View {
         NavigationStack {
@@ -189,6 +193,19 @@ private struct SettingsView: View {
                     }
                 }
 
+                Section("API Base URL") {
+                    TextField("https://api.whatai.cc", text: $baseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+
+                    if !baseURLError.isEmpty {
+                        Text(baseURLError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 Section {
                     Button {
                         saveSettings()
@@ -210,7 +227,9 @@ private struct SettingsView: View {
                 language1ID = settings.language1ID
                 language2ID = settings.language2ID
                 apiKey = settings.apiKey
+                baseURL = settings.baseURL
                 apiKeyError = ""
+                baseURLError = ""
             }
         }
     }
@@ -227,11 +246,19 @@ private struct SettingsView: View {
             return
         }
 
+        if let validationError = AppSettings.validateBaseURL(baseURL) {
+            baseURLError = validationError
+            saveMessage = validationError
+            return
+        }
+
         apiKeyError = ""
+        baseURLError = ""
         settings.save(
             language1ID: language1ID,
             language2ID: language2ID,
-            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         saveMessage = "Saved."
     }
