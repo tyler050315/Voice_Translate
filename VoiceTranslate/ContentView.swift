@@ -201,7 +201,7 @@ private struct SettingsView: View {
                     if !saveMessage.isEmpty {
                         Text(saveMessage)
                             .font(.footnote)
-                            .foregroundStyle(saveMessage == "Saved." ? .secondary : .red)
+                            .foregroundStyle(saveMessage == "Saved." ? Color.secondary : Color.red)
                     }
                 }
             }
