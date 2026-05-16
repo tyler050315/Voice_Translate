@@ -22,10 +22,31 @@ enum LanguageCatalog {
     }
 }
 
+enum SpeechPlaybackMode: String, CaseIterable, Identifiable {
+    case manual = "manual"
+    case automatic = "automatic"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .manual:
+            return "Manual Playback"
+        case .automatic:
+            return "Auto Playback"
+        }
+    }
+
+    static func mode(for id: String) -> SpeechPlaybackMode {
+        SpeechPlaybackMode(rawValue: id) ?? .manual
+    }
+}
+
 final class AppSettings: ObservableObject {
     @Published var language1ID: String
     @Published var language2ID: String
     @Published var zhipuAPIKey: String
+    @Published var speechPlaybackModeID: String
 
     private let defaults: UserDefaults
 
@@ -34,6 +55,7 @@ final class AppSettings: ObservableObject {
         language1ID = defaults.string(forKey: "language1") ?? "zh-CN"
         language2ID = defaults.string(forKey: "language2") ?? "en-US"
         zhipuAPIKey = defaults.string(forKey: "zhipuAPIKey") ?? ""
+        speechPlaybackModeID = defaults.string(forKey: "speechPlaybackMode") ?? SpeechPlaybackMode.manual.rawValue
     }
 
     var language1: TranslationLanguage {
@@ -44,14 +66,20 @@ final class AppSettings: ObservableObject {
         LanguageCatalog.language(for: language2ID)
     }
 
-    func save(language1ID: String, language2ID: String, zhipuAPIKey: String) {
+    var speechPlaybackMode: SpeechPlaybackMode {
+        SpeechPlaybackMode.mode(for: speechPlaybackModeID)
+    }
+
+    func save(language1ID: String, language2ID: String, zhipuAPIKey: String, speechPlaybackModeID: String) {
         self.language1ID = language1ID
         self.language2ID = language2ID
         self.zhipuAPIKey = zhipuAPIKey
+        self.speechPlaybackModeID = speechPlaybackModeID
 
         defaults.set(language1ID, forKey: "language1")
         defaults.set(language2ID, forKey: "language2")
         defaults.set(zhipuAPIKey, forKey: "zhipuAPIKey")
+        defaults.set(speechPlaybackModeID, forKey: "speechPlaybackMode")
     }
 
     static func validateAPIKey(_ apiKey: String) -> String? {

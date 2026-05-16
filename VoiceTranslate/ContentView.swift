@@ -2,6 +2,7 @@ import Combine
 import AVFoundation
 import Foundation
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var settings = AppSettings()
@@ -31,6 +32,9 @@ private struct MainView: View {
     @State private var translatedText = "Translation text will appear here after speech is processed."
     @State private var speechText = ""
     @State private var speechLanguageID = ""
+    @State private var autoSpeechTask: Task<Void, Never>?
+    @State private var isShowingExportOptions = false
+    @State private var shareItem: ShareItem?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -40,14 +44,13 @@ private struct MainView: View {
 
             translatedTextBox
 
-            microphoneIndicator
-
             Text(audioMonitor.statusText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(height: 18)
 
             Button {
+                autoSpeechTask?.cancel()
                 speechPlayer.stop()
                 audioMonitor.updateTranslationSettings(
                     zhipuAPIKey: settings.zhipuAPIKey,
@@ -81,10 +84,19 @@ private struct MainView: View {
             translatedText = result
         }
         .onReceive(audioMonitor.$latestTranslation) { result in
+            autoSpeechTask?.cancel()
             if let result {
                 speechText = result.translatedText
                 speechLanguageID = result.targetLanguageID
+                if settings.speechPlaybackMode == .automatic {
+                    autoSpeechTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(200))
+                        guard !Task.isCancelled else { return }
+                        speechPlayer.speak(result.translatedText, languageID: result.targetLanguageID)
+                    }
+                }
             } else {
+                autoSpeechTask = nil
                 speechPlayer.stop()
                 speechText = ""
                 speechLanguageID = ""
@@ -147,35 +159,68 @@ private struct MainView: View {
     }
 
     private var translatedTextBox: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             ScrollView(.vertical, showsIndicators: false) {
-                Text(translatedText)
-                    .font(.title2)
-                    .lineSpacing(6)
+                translationContent
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(18)
-                    .padding(.bottom, hasSpeechText ? 54 : 0)
+                    .padding(.top, hasTranslation ? 38 : 0)
+                    .padding(.bottom, 66)
             }
 
-            if hasSpeechText {
-                Button {
-                    if speechPlayer.isSpeaking {
-                        speechPlayer.stop()
-                    } else {
-                        speechPlayer.speak(speechText, languageID: speechLanguageID)
+            if hasTranslation {
+                VStack {
+                    HStack {
+                        Spacer()
+
+                        Button {
+                            isShowingExportOptions = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 38, height: 38)
+                        }
+                        .buttonStyle(.bordered)
+                        .clipShape(Circle())
+                        .accessibilityLabel("Export translation text")
                     }
-                } label: {
-                    Image(systemName: speechPlayer.isSpeaking ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 12)
+
+                    Spacer()
                 }
-                .buttonStyle(.borderedProminent)
-                .clipShape(Circle())
+            }
+
+            VStack {
+                Spacer()
+
+                HStack {
+                    microphoneIndicator
+
+                    Spacer()
+
+                    if hasSpeechText {
+                        Button {
+                            autoSpeechTask?.cancel()
+                            if speechPlayer.isSpeaking {
+                                speechPlayer.stop()
+                            } else {
+                                speechPlayer.speak(speechText, languageID: speechLanguageID)
+                            }
+                        } label: {
+                            Image(systemName: speechPlayer.isSpeaking ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .clipShape(Circle())
+                        .accessibilityLabel(speechPlayer.isSpeaking ? "Stop speaking translation" : "Speak translation")
+                    }
+                }
                 .padding(14)
-                .accessibilityLabel(speechPlayer.isSpeaking ? "Stop speaking translation" : "Speak translation")
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 430, maxHeight: .infinity)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
@@ -183,10 +228,59 @@ private struct MainView: View {
                 .stroke(Color(.separator), lineWidth: 0.5)
         }
         .layoutPriority(1)
+        .confirmationDialog("Export Text", isPresented: $isShowingExportOptions, titleVisibility: .visible) {
+            Button("Export All") {
+                export(.all)
+            }
+
+            Button("Export Original") {
+                export(.original)
+            }
+
+            Button("Export Translation") {
+                export(.translation)
+            }
+
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(item: $shareItem) { item in
+            ShareSheet(items: [item.text])
+        }
     }
 
     private var hasSpeechText: Bool {
         !speechText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasTranslation: Bool {
+        audioMonitor.latestTranslation != nil
+    }
+
+    @ViewBuilder
+    private var translationContent: some View {
+        if let translation = audioMonitor.latestTranslation {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(translation.translatedText)
+                    .font(.title2)
+                    .foregroundStyle(Color(red: 0.03, green: 0.18, blue: 0.42))
+                    .lineSpacing(6)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Source: \(translation.sourceLanguage)")
+                    Text("Target: \(translation.targetLanguage)")
+                    Text("Original:")
+                    Text(translation.transcript)
+                }
+                .font(.body)
+                .foregroundStyle(Color(.systemGray))
+                .lineSpacing(4)
+            }
+        } else {
+            Text(translatedText)
+                .font(.title2)
+                .lineSpacing(6)
+                .foregroundStyle(.primary)
+        }
     }
 
     private var microphoneIndicator: some View {
@@ -206,6 +300,31 @@ private struct MainView: View {
         }
         .accessibilityLabel(audioMonitor.isVoiceDetected ? "Voice detected" : "Microphone idle")
     }
+
+    private func export(_ option: ExportOption) {
+        guard let translation = audioMonitor.latestTranslation else { return }
+
+        let text: String
+        switch option {
+        case .all:
+            text = """
+            Translation:
+            \(translation.translatedText)
+
+            Source: \(translation.sourceLanguage)
+            Target: \(translation.targetLanguage)
+
+            Original:
+            \(translation.transcript)
+            """
+        case .original:
+            text = translation.transcript
+        case .translation:
+            text = translation.translatedText
+        }
+
+        shareItem = ShareItem(text: text)
+    }
 }
 
 private struct SettingsView: View {
@@ -213,6 +332,7 @@ private struct SettingsView: View {
     @State private var language1ID = ""
     @State private var language2ID = ""
     @State private var zhipuAPIKey = ""
+    @State private var speechPlaybackModeID = SpeechPlaybackMode.manual.rawValue
     @State private var saveMessage = ""
     @State private var zhipuAPIKeyError = ""
 
@@ -251,6 +371,14 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Speech Playback") {
+                    Picker("Playback", selection: $speechPlaybackModeID) {
+                        ForEach(SpeechPlaybackMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode.id)
+                        }
+                    }
+                }
+
                 Section {
                     Button {
                         saveSettings()
@@ -272,6 +400,7 @@ private struct SettingsView: View {
                 language1ID = settings.language1ID
                 language2ID = settings.language2ID
                 zhipuAPIKey = settings.zhipuAPIKey
+                speechPlaybackModeID = settings.speechPlaybackModeID
                 zhipuAPIKeyError = ""
             }
         }
@@ -293,7 +422,8 @@ private struct SettingsView: View {
         settings.save(
             language1ID: language1ID,
             language2ID: language2ID,
-            zhipuAPIKey: zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            zhipuAPIKey: zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            speechPlaybackModeID: speechPlaybackModeID
         )
         saveMessage = "Saved."
     }
@@ -316,6 +446,27 @@ private enum NetworkPermissionPrimer {
 
         URLSession.shared.dataTask(with: request).resume()
     }
+}
+
+private enum ExportOption {
+    case all
+    case original
+    case translation
+}
+
+private struct ShareItem: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 @MainActor
