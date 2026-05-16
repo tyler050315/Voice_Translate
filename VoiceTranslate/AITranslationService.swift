@@ -2,7 +2,6 @@ import Foundation
 
 struct TranslationContext {
     let zhipuAPIKey: String
-    let openAIAPIKey: String
     let language1: TranslationLanguage
     let language2: TranslationLanguage
 }
@@ -16,17 +15,16 @@ struct TranslationResult {
 
 enum AITranslationServiceError: LocalizedError {
     case missingZhipuAPIKey
-    case missingOpenAIAPIKey
     case invalidResponse
     case requestFailed(provider: String, statusCode: Int, message: String, code: String?)
+    case requestTimedOut(provider: String)
+    case transportFailed(provider: String, message: String)
     case emptyTranscript
 
     var errorDescription: String? {
         switch self {
         case .missingZhipuAPIKey:
             return "Please enter and save your Zhipu API key in Settings."
-        case .missingOpenAIAPIKey:
-            return "Please enter and save your OpenAI API key in Settings."
         case .invalidResponse:
             return "The AI service returned an unexpected response."
         case .requestFailed(let provider, let statusCode, let message, let code):
@@ -39,6 +37,10 @@ enum AITranslationServiceError: LocalizedError {
             }
 
             return "\(provider) request failed (\(statusCode)): \(message)"
+        case .requestTimedOut(let provider):
+            return "\(provider) request timed out. Please check the network connection and try again."
+        case .transportFailed(let provider, let message):
+            return "\(provider) network request failed: \(message)"
         case .emptyTranscript:
             return "No speech text was recognized from the recording."
         }
@@ -50,7 +52,9 @@ private extension AITranslationServiceError {
         switch self {
         case .requestFailed(_, let statusCode, _, _):
             return statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
-        case .missingZhipuAPIKey, .missingOpenAIAPIKey, .invalidResponse, .emptyTranscript:
+        case .requestTimedOut, .transportFailed:
+            return true
+        case .missingZhipuAPIKey, .invalidResponse, .emptyTranscript:
             return false
         }
     }
@@ -58,12 +62,10 @@ private extension AITranslationServiceError {
 
 final class AITranslationService {
     private let zhipuAPIKey: String
-    private let openAIAPIKey: String
     private let session: URLSession
 
-    init(zhipuAPIKey: String, openAIAPIKey: String, session: URLSession = .shared) {
+    init(zhipuAPIKey: String, session: URLSession = .shared) {
         self.zhipuAPIKey = zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.openAIAPIKey = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.session = session
     }
 
@@ -73,7 +75,7 @@ final class AITranslationService {
             throw AITranslationServiceError.emptyTranscript
         }
 
-        return try await translateTranscriptWithOpenAI(transcript, context: context)
+        return try await translateTranscriptWithZhipu(transcript, context: context)
     }
 
     private func transcribeAudioWithZhipu(at audioURL: URL) async throws -> String {
@@ -82,6 +84,7 @@ final class AITranslationService {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: URL(string: "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions")!)
         request.httpMethod = "POST"
+        request.timeoutInterval = 45
         request.setValue("Bearer \(zhipuAPIKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = try makeMultipartBody(
@@ -95,17 +98,18 @@ final class AITranslationService {
             mimeType: "audio/wav"
         )
 
-        let data = try await send(request, provider: "Zhipu")
+        let data = try await send(request, provider: "Zhipu ASR")
         let response = try JSONDecoder().decode(TranscriptionResponse.self, from: data)
         return response.text
     }
 
-    private func translateTranscriptWithOpenAI(_ transcript: String, context: TranslationContext) async throws -> TranslationResult {
-        guard !openAIAPIKey.isEmpty else { throw AITranslationServiceError.missingOpenAIAPIKey }
+    private func translateTranscriptWithZhipu(_ transcript: String, context: TranslationContext) async throws -> TranslationResult {
+        guard !zhipuAPIKey.isEmpty else { throw AITranslationServiceError.missingZhipuAPIKey }
 
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        var request = URLRequest(url: URL(string: "https://open.bigmodel.cn/api/paas/v4/chat/completions")!)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(openAIAPIKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 45
+        request.setValue("Bearer \(zhipuAPIKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let systemMessage = """
@@ -118,9 +122,11 @@ final class AITranslationService {
         """
 
         let payload = ChatCompletionRequest(
-            model: "gpt-5.1",
+            model: "glm-5.1",
             temperature: 0,
             responseFormat: ResponseFormat(type: "json_object"),
+            thinking: Thinking(type: "disabled"),
+            stream: false,
             messages: [
                 ChatMessage(role: "system", content: systemMessage),
                 ChatMessage(role: "user", content: transcript)
@@ -128,7 +134,7 @@ final class AITranslationService {
         )
         request.httpBody = try JSONEncoder().encode(payload)
 
-        let data = try await send(request, provider: "OpenAI")
+        let data = try await send(request, provider: "Zhipu translation")
         let response = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
         guard let content = response.choices.first?.message.content.data(using: .utf8) else {
             throw AITranslationServiceError.invalidResponse
@@ -166,7 +172,21 @@ final class AITranslationService {
     }
 
     private func sendOnce(_ request: URLRequest, provider: String) async throws -> Data {
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            if error.code == .timedOut {
+                throw AITranslationServiceError.requestTimedOut(provider: provider)
+            }
+
+            throw AITranslationServiceError.transportFailed(provider: provider, message: error.localizedDescription)
+        } catch {
+            throw AITranslationServiceError.transportFailed(provider: provider, message: error.localizedDescription)
+        }
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AITranslationServiceError.invalidResponse
         }
@@ -228,17 +248,25 @@ private struct ChatCompletionRequest: Encodable {
     let model: String
     let temperature: Int
     let responseFormat: ResponseFormat
+    let thinking: Thinking
+    let stream: Bool
     let messages: [ChatMessage]
 
     enum CodingKeys: String, CodingKey {
         case model
         case temperature
         case responseFormat = "response_format"
+        case thinking
+        case stream
         case messages
     }
 }
 
 private struct ResponseFormat: Encodable {
+    let type: String
+}
+
+private struct Thinking: Encodable {
     let type: String
 }
 

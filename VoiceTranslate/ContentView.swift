@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import SwiftUI
 
 struct ContentView: View {
@@ -15,6 +16,9 @@ struct ContentView: View {
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
+        }
+        .onAppear {
+            NetworkPermissionPrimer.requestAccessIfNeeded()
         }
     }
 }
@@ -42,7 +46,6 @@ private struct MainView: View {
             Button {
                 audioMonitor.updateTranslationSettings(
                     zhipuAPIKey: settings.zhipuAPIKey,
-                    openAIAPIKey: settings.openAIAPIKey,
                     language1: settings.language1,
                     language2: settings.language2
                 )
@@ -65,7 +68,6 @@ private struct MainView: View {
         .onAppear {
             audioMonitor.updateTranslationSettings(
                 zhipuAPIKey: settings.zhipuAPIKey,
-                openAIAPIKey: settings.openAIAPIKey,
                 language1: settings.language1,
                 language2: settings.language2
             )
@@ -171,10 +173,8 @@ private struct SettingsView: View {
     @State private var language1ID = ""
     @State private var language2ID = ""
     @State private var zhipuAPIKey = ""
-    @State private var openAIAPIKey = ""
     @State private var saveMessage = ""
     @State private var zhipuAPIKeyError = ""
-    @State private var openAIAPIKeyError = ""
 
     var body: some View {
         NavigationStack {
@@ -193,7 +193,7 @@ private struct SettingsView: View {
                     }
                 }
 
-                Section("Zhipu ASR API Key") {
+                Section("Zhipu API Key") {
                     SecureField("Enter Zhipu API key", text: $zhipuAPIKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -205,20 +205,8 @@ private struct SettingsView: View {
                     }
                 }
 
-                Section("OpenAI API Key") {
-                    SecureField("Enter OpenAI API key", text: $openAIAPIKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-
-                    if !openAIAPIKeyError.isEmpty {
-                        Text(openAIAPIKeyError)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Section("Audio") {
-                    Text("Zhipu GLM-ASR-2512 uses WAV recording for maximum compatibility.")
+                Section("AI Services") {
+                    Text("Zhipu GLM-ASR-2512 handles speech recognition. Zhipu GLM-5.1 handles translation.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -244,9 +232,7 @@ private struct SettingsView: View {
                 language1ID = settings.language1ID
                 language2ID = settings.language2ID
                 zhipuAPIKey = settings.zhipuAPIKey
-                openAIAPIKey = settings.openAIAPIKey
                 zhipuAPIKeyError = ""
-                openAIAPIKeyError = ""
             }
         }
     }
@@ -263,19 +249,11 @@ private struct SettingsView: View {
             return
         }
 
-        if let validationError = AppSettings.validateAPIKey(openAIAPIKey) {
-            openAIAPIKeyError = validationError
-            saveMessage = validationError
-            return
-        }
-
         zhipuAPIKeyError = ""
-        openAIAPIKeyError = ""
         settings.save(
             language1ID: language1ID,
             language2ID: language2ID,
-            zhipuAPIKey: zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines),
-            openAIAPIKey: openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            zhipuAPIKey: zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         saveMessage = "Saved."
     }
@@ -283,4 +261,19 @@ private struct SettingsView: View {
 
 #Preview {
     ContentView()
+}
+
+private enum NetworkPermissionPrimer {
+    private static var hasRequestedAccess = false
+
+    static func requestAccessIfNeeded() {
+        guard !hasRequestedAccess else { return }
+        hasRequestedAccess = true
+
+        guard let url = URL(string: "https://open.bigmodel.cn/api/paas/v4/") else { return }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
+        request.httpMethod = "HEAD"
+
+        URLSession.shared.dataTask(with: request).resume()
+    }
 }

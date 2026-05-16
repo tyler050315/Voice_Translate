@@ -28,13 +28,11 @@ final class AudioMonitor: ObservableObject {
 
     func updateTranslationSettings(
         zhipuAPIKey: String,
-        openAIAPIKey: String,
         language1: TranslationLanguage,
         language2: TranslationLanguage
     ) {
         translationContext = TranslationContext(
             zhipuAPIKey: zhipuAPIKey,
-            openAIAPIKey: openAIAPIKey,
             language1: language1,
             language2: language2
         )
@@ -280,8 +278,7 @@ final class AudioMonitor: ObservableObject {
 
         do {
             let service = AITranslationService(
-                zhipuAPIKey: context.zhipuAPIKey,
-                openAIAPIKey: context.openAIAPIKey
+                zhipuAPIKey: context.zhipuAPIKey
             )
             let result = try await service.translateAudio(at: url, context: context)
             await MainActor.run {

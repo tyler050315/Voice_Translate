@@ -26,7 +26,6 @@ final class AppSettings: ObservableObject {
     @Published var language1ID: String
     @Published var language2ID: String
     @Published var zhipuAPIKey: String
-    @Published var openAIAPIKey: String
 
     private let defaults: UserDefaults
 
@@ -35,7 +34,6 @@ final class AppSettings: ObservableObject {
         language1ID = defaults.string(forKey: "language1") ?? "zh-CN"
         language2ID = defaults.string(forKey: "language2") ?? "en-US"
         zhipuAPIKey = defaults.string(forKey: "zhipuAPIKey") ?? ""
-        openAIAPIKey = defaults.string(forKey: "openAIAPIKey") ?? defaults.string(forKey: "apiKey") ?? ""
     }
 
     var language1: TranslationLanguage {
@@ -46,16 +44,14 @@ final class AppSettings: ObservableObject {
         LanguageCatalog.language(for: language2ID)
     }
 
-    func save(language1ID: String, language2ID: String, zhipuAPIKey: String, openAIAPIKey: String) {
+    func save(language1ID: String, language2ID: String, zhipuAPIKey: String) {
         self.language1ID = language1ID
         self.language2ID = language2ID
         self.zhipuAPIKey = zhipuAPIKey
-        self.openAIAPIKey = openAIAPIKey
 
         defaults.set(language1ID, forKey: "language1")
         defaults.set(language2ID, forKey: "language2")
         defaults.set(zhipuAPIKey, forKey: "zhipuAPIKey")
-        defaults.set(openAIAPIKey, forKey: "openAIAPIKey")
     }
 
     static func validateAPIKey(_ apiKey: String) -> String? {
