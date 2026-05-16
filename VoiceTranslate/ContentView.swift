@@ -387,8 +387,10 @@ private struct SettingsView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .disabled(language1ID == language2ID)
+                }
 
-                    if !saveMessage.isEmpty {
+                if !saveMessage.isEmpty {
+                    Section {
                         Text(saveMessage)
                             .font(.footnote)
                             .foregroundStyle(saveMessage == "Saved." ? Color.secondary : Color.red)
@@ -397,13 +399,17 @@ private struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear {
-                language1ID = settings.language1ID
-                language2ID = settings.language2ID
+                language1ID = LanguageCatalog.contains(settings.language1ID) ? settings.language1ID : LanguageCatalog.all[0].id
+                language2ID = LanguageCatalog.contains(settings.language2ID) ? settings.language2ID : fallbackLanguage2ID(excluding: language1ID)
                 zhipuAPIKey = settings.zhipuAPIKey
                 speechPlaybackModeID = settings.speechPlaybackModeID
                 zhipuAPIKeyError = ""
             }
         }
+    }
+
+    private func fallbackLanguage2ID(excluding language1ID: String) -> String {
+        LanguageCatalog.all.first { $0.id != language1ID }?.id ?? language1ID
     }
 
     private func saveSettings() {

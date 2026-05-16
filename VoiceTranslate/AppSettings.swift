@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 struct TranslationLanguage: Identifiable, Hashable {
@@ -7,18 +8,40 @@ struct TranslationLanguage: Identifiable, Hashable {
 }
 
 enum LanguageCatalog {
-    static let all: [TranslationLanguage] = [
+    private static let candidates: [TranslationLanguage] = [
         TranslationLanguage(id: "zh-CN", name: "Chinese", displayName: "Chinese"),
         TranslationLanguage(id: "en-US", name: "English", displayName: "English"),
         TranslationLanguage(id: "ja-JP", name: "Japanese", displayName: "Japanese"),
-        TranslationLanguage(id: "ko-KR", name: "Korean", displayName: "Korean"),
         TranslationLanguage(id: "fr-FR", name: "French", displayName: "French"),
         TranslationLanguage(id: "de-DE", name: "German", displayName: "German"),
-        TranslationLanguage(id: "es-ES", name: "Spanish", displayName: "Spanish")
+        TranslationLanguage(id: "es-ES", name: "Spanish", displayName: "Spanish"),
+        TranslationLanguage(id: "ru-RU", name: "Russian", displayName: "Russian")
     ]
+
+    static var all: [TranslationLanguage] {
+        candidates.filter { supportsLocalSpeech(for: $0.id) }
+    }
 
     static func language(for id: String) -> TranslationLanguage {
         all.first { $0.id == id } ?? all[0]
+    }
+
+    static func contains(_ id: String) -> Bool {
+        all.contains { $0.id == id }
+    }
+
+    private static func supportsLocalSpeech(for languageID: String) -> Bool {
+        if AVSpeechSynthesisVoice(language: languageID) != nil {
+            return true
+        }
+
+        guard let languagePrefix = languageID.split(separator: "-").first else {
+            return false
+        }
+
+        return AVSpeechSynthesisVoice.speechVoices().contains { voice in
+            voice.language.hasPrefix(languagePrefix)
+        }
     }
 }
 
