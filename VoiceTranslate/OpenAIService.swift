@@ -1,11 +1,10 @@
 import Foundation
 
 struct TranslationContext {
-    let apiKey: String
-    let baseURL: String
+    let zhipuAPIKey: String
+    let openAIAPIKey: String
     let language1: TranslationLanguage
     let language2: TranslationLanguage
-    let audioFormat: AudioRecordingFormat
 }
 
 struct TranslationResult {
@@ -15,112 +14,98 @@ struct TranslationResult {
     let translatedText: String
 }
 
-enum OpenAIServiceError: LocalizedError {
-    case missingAPIKey
+enum AITranslationServiceError: LocalizedError {
+    case missingZhipuAPIKey
+    case missingOpenAIAPIKey
     case invalidResponse
-    case requestFailed(statusCode: Int, message: String, code: String?)
+    case requestFailed(provider: String, statusCode: Int, message: String, code: String?)
     case emptyTranscript
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey:
-            return "Please enter and save your AI API key in Settings."
+        case .missingZhipuAPIKey:
+            return "Please enter and save your Zhipu API key in Settings."
+        case .missingOpenAIAPIKey:
+            return "Please enter and save your OpenAI API key in Settings."
         case .invalidResponse:
             return "The AI service returned an unexpected response."
-        case .requestFailed(let statusCode, let message, let code):
-            if (statusCode == 400 || statusCode == 415 || statusCode == 422)
-                && Self.looksLikeAudioFormatError(message) {
-                return "The current API Base URL may not support this audio format. Try WAV Compatible in Settings."
+        case .requestFailed(let provider, let statusCode, let message, let code):
+            if code == "insufficient_quota" || message.localizedCaseInsensitiveContains("quota") {
+                return "\(provider) quota exceeded. Please check the API key account's billing plan and available credits."
             }
 
             if statusCode == 503 || message.localizedCaseInsensitiveContains("overloaded") {
-                return "The AI service is temporarily overloaded. Please try again in a moment, or switch to another API Base URL in Settings."
+                return "\(provider) is temporarily overloaded. Please try again in a moment."
             }
 
-            if code == "insufficient_quota" || message.localizedCaseInsensitiveContains("quota") {
-                return "OpenAI quota exceeded. Please check the API key account's billing plan and available credits."
-            }
-
-            return "OpenAI request failed (\(statusCode)): \(message)"
+            return "\(provider) request failed (\(statusCode)): \(message)"
         case .emptyTranscript:
             return "No speech text was recognized from the recording."
         }
     }
-
-    private static func looksLikeAudioFormatError(_ message: String) -> Bool {
-        let lowercasedMessage = message.lowercased()
-        return lowercasedMessage.contains("format")
-            || lowercasedMessage.contains("type")
-            || lowercasedMessage.contains("decode")
-            || lowercasedMessage.contains("m4a")
-            || lowercasedMessage.contains("audio")
-    }
 }
 
-private extension OpenAIServiceError {
+private extension AITranslationServiceError {
     var isRetryable: Bool {
         switch self {
-        case .requestFailed(let statusCode, _, _):
+        case .requestFailed(_, let statusCode, _, _):
             return statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
-        case .missingAPIKey, .invalidResponse, .emptyTranscript:
+        case .missingZhipuAPIKey, .missingOpenAIAPIKey, .invalidResponse, .emptyTranscript:
             return false
         }
     }
 }
 
-final class OpenAIService {
-    private let apiKey: String
-    private let baseURL: URL
+final class AITranslationService {
+    private let zhipuAPIKey: String
+    private let openAIAPIKey: String
     private let session: URLSession
 
-    init(apiKey: String, baseURL: String, session: URLSession = .shared) throws {
-        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: trimmedBaseURL) else {
-            throw OpenAIServiceError.invalidResponse
-        }
-        self.baseURL = url
+    init(zhipuAPIKey: String, openAIAPIKey: String, session: URLSession = .shared) {
+        self.zhipuAPIKey = zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.openAIAPIKey = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.session = session
     }
 
     func translateAudio(at audioURL: URL, context: TranslationContext) async throws -> TranslationResult {
-        guard !apiKey.isEmpty else { throw OpenAIServiceError.missingAPIKey }
-
-        let transcript = try await transcribeAudio(at: audioURL)
+        let transcript = try await transcribeAudioWithZhipu(at: audioURL)
         guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw OpenAIServiceError.emptyTranscript
+            throw AITranslationServiceError.emptyTranscript
         }
 
-        return try await translateTranscript(transcript, context: context)
+        return try await translateTranscriptWithOpenAI(transcript, context: context)
     }
 
-    private func transcribeAudio(at audioURL: URL) async throws -> String {
+    private func transcribeAudioWithZhipu(at audioURL: URL) async throws -> String {
+        guard !zhipuAPIKey.isEmpty else { throw AITranslationServiceError.missingZhipuAPIKey }
+
         let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(url: endpoint("/v1/audio/transcriptions"))
+        var request = URLRequest(url: URL(string: "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions")!)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(zhipuAPIKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = try makeMultipartBody(
             boundary: boundary,
             fields: [
-                "model": "gpt-4o-mini-transcribe",
-                "response_format": "json"
+                "model": "glm-asr-2512",
+                "stream": "false"
             ],
             fileURL: audioURL,
             fileFieldName: "file",
-            mimeType: Self.mimeType(for: audioURL)
+            mimeType: "audio/wav"
         )
 
-        let data = try await send(request)
+        let data = try await send(request, provider: "Zhipu")
         let response = try JSONDecoder().decode(TranscriptionResponse.self, from: data)
         return response.text
     }
 
-    private func translateTranscript(_ transcript: String, context: TranslationContext) async throws -> TranslationResult {
-        var request = URLRequest(url: endpoint("/v1/chat/completions"))
+    private func translateTranscriptWithOpenAI(_ transcript: String, context: TranslationContext) async throws -> TranslationResult {
+        guard !openAIAPIKey.isEmpty else { throw AITranslationServiceError.missingOpenAIAPIKey }
+
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(openAIAPIKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let systemMessage = """
@@ -133,7 +118,7 @@ final class OpenAIService {
         """
 
         let payload = ChatCompletionRequest(
-            model: "gpt-5.5",
+            model: "gpt-5.1",
             temperature: 0,
             responseFormat: ResponseFormat(type: "json_object"),
             messages: [
@@ -143,10 +128,10 @@ final class OpenAIService {
         )
         request.httpBody = try JSONEncoder().encode(payload)
 
-        let data = try await send(request)
+        let data = try await send(request, provider: "OpenAI")
         let response = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
         guard let content = response.choices.first?.message.content.data(using: .utf8) else {
-            throw OpenAIServiceError.invalidResponse
+            throw AITranslationServiceError.invalidResponse
         }
 
         let translated = try JSONDecoder().decode(TranslationPayload.self, from: content)
@@ -158,14 +143,14 @@ final class OpenAIService {
         )
     }
 
-    private func send(_ request: URLRequest) async throws -> Data {
+    private func send(_ request: URLRequest, provider: String) async throws -> Data {
         let maxAttempts = 2
-        var lastError: OpenAIServiceError?
+        var lastError: AITranslationServiceError?
 
         for attempt in 1...maxAttempts {
             do {
-                return try await sendOnce(request)
-            } catch let error as OpenAIServiceError {
+                return try await sendOnce(request, provider: provider)
+            } catch let error as AITranslationServiceError {
                 lastError = error
 
                 if attempt < maxAttempts, error.isRetryable {
@@ -177,18 +162,19 @@ final class OpenAIService {
             }
         }
 
-        throw lastError ?? OpenAIServiceError.invalidResponse
+        throw lastError ?? AITranslationServiceError.invalidResponse
     }
 
-    private func sendOnce(_ request: URLRequest) async throws -> Data {
+    private func sendOnce(_ request: URLRequest, provider: String) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw OpenAIServiceError.invalidResponse
+            throw AITranslationServiceError.invalidResponse
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            if let apiError = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data) {
-                throw OpenAIServiceError.requestFailed(
+            if let apiError = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
+                throw AITranslationServiceError.requestFailed(
+                    provider: provider,
                     statusCode: httpResponse.statusCode,
                     message: apiError.error.message,
                     code: apiError.error.code
@@ -196,18 +182,15 @@ final class OpenAIService {
             }
 
             let message = String(data: data, encoding: .utf8) ?? "Request failed."
-            throw OpenAIServiceError.requestFailed(statusCode: httpResponse.statusCode, message: message, code: nil)
+            throw AITranslationServiceError.requestFailed(
+                provider: provider,
+                statusCode: httpResponse.statusCode,
+                message: message,
+                code: nil
+            )
         }
 
         return data
-    }
-
-    private func endpoint(_ path: String) -> URL {
-        path
-            .split(separator: "/")
-            .reduce(baseURL) { partialURL, component in
-                partialURL.appendingPathComponent(String(component))
-            }
     }
 
     private func makeMultipartBody(
@@ -234,17 +217,6 @@ final class OpenAIService {
         body.append("--\(boundary)--\r\n")
 
         return body
-    }
-
-    private static func mimeType(for audioURL: URL) -> String {
-        switch audioURL.pathExtension.lowercased() {
-        case "m4a":
-            return "audio/mp4"
-        case "wav":
-            return "audio/wav"
-        default:
-            return "application/octet-stream"
-        }
     }
 }
 
@@ -299,7 +271,7 @@ private struct TranslationPayload: Decodable {
     }
 }
 
-private struct OpenAIErrorResponse: Decodable {
+private struct APIErrorResponse: Decodable {
     let error: APIError
 
     struct APIError: Decodable {

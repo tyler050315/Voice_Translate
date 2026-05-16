@@ -41,11 +41,10 @@ private struct MainView: View {
 
             Button {
                 audioMonitor.updateTranslationSettings(
-                    apiKey: settings.apiKey,
-                    baseURL: settings.baseURL,
+                    zhipuAPIKey: settings.zhipuAPIKey,
+                    openAIAPIKey: settings.openAIAPIKey,
                     language1: settings.language1,
-                    language2: settings.language2,
-                    audioFormat: settings.audioFormat
+                    language2: settings.language2
                 )
                 audioMonitor.toggleListening()
             } label: {
@@ -65,11 +64,10 @@ private struct MainView: View {
         .background(Color(.systemGroupedBackground))
         .onAppear {
             audioMonitor.updateTranslationSettings(
-                apiKey: settings.apiKey,
-                baseURL: settings.baseURL,
+                zhipuAPIKey: settings.zhipuAPIKey,
+                openAIAPIKey: settings.openAIAPIKey,
                 language1: settings.language1,
-                language2: settings.language2,
-                audioFormat: settings.audioFormat
+                language2: settings.language2
             )
         }
         .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
@@ -172,12 +170,11 @@ private struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @State private var language1ID = ""
     @State private var language2ID = ""
-    @State private var apiKey = ""
-    @State private var baseURL = ""
-    @State private var audioFormatID = AudioRecordingFormat.m4aAAC.rawValue
+    @State private var zhipuAPIKey = ""
+    @State private var openAIAPIKey = ""
     @State private var saveMessage = ""
-    @State private var apiKeyError = ""
-    @State private var baseURLError = ""
+    @State private var zhipuAPIKeyError = ""
+    @State private var openAIAPIKeyError = ""
 
     var body: some View {
         NavigationStack {
@@ -196,39 +193,32 @@ private struct SettingsView: View {
                     }
                 }
 
-                Section("AI API Key") {
-                    SecureField("Enter API key", text: $apiKey)
+                Section("Zhipu ASR API Key") {
+                    SecureField("Enter Zhipu API key", text: $zhipuAPIKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
 
-                    if !apiKeyError.isEmpty {
-                        Text(apiKeyError)
+                    if !zhipuAPIKeyError.isEmpty {
+                        Text(zhipuAPIKeyError)
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
                 }
 
-                Section("API Base URL") {
-                    TextField("https://api.whatai.cc", text: $baseURL)
+                Section("OpenAI API Key") {
+                    SecureField("Enter OpenAI API key", text: $openAIAPIKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .keyboardType(.URL)
 
-                    if !baseURLError.isEmpty {
-                        Text(baseURLError)
+                    if !openAIAPIKeyError.isEmpty {
+                        Text(openAIAPIKeyError)
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
                 }
 
-                Section("Audio Format") {
-                    Picker("Recording Format", selection: $audioFormatID) {
-                        ForEach(AudioRecordingFormat.allCases) { format in
-                            Text(format.displayName).tag(format.id)
-                        }
-                    }
-
-                    Text(AudioRecordingFormat.format(for: audioFormatID).detailText)
+                Section("Audio") {
+                    Text("Zhipu GLM-ASR-2512 uses WAV recording for maximum compatibility.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -253,11 +243,10 @@ private struct SettingsView: View {
             .onAppear {
                 language1ID = settings.language1ID
                 language2ID = settings.language2ID
-                apiKey = settings.apiKey
-                baseURL = settings.baseURL
-                audioFormatID = settings.audioFormatID
-                apiKeyError = ""
-                baseURLError = ""
+                zhipuAPIKey = settings.zhipuAPIKey
+                openAIAPIKey = settings.openAIAPIKey
+                zhipuAPIKeyError = ""
+                openAIAPIKeyError = ""
             }
         }
     }
@@ -268,26 +257,25 @@ private struct SettingsView: View {
             return
         }
 
-        if let validationError = AppSettings.validateAPIKey(apiKey) {
-            apiKeyError = validationError
+        if let validationError = AppSettings.validateAPIKey(zhipuAPIKey) {
+            zhipuAPIKeyError = validationError
             saveMessage = validationError
             return
         }
 
-        if let validationError = AppSettings.validateBaseURL(baseURL) {
-            baseURLError = validationError
+        if let validationError = AppSettings.validateAPIKey(openAIAPIKey) {
+            openAIAPIKeyError = validationError
             saveMessage = validationError
             return
         }
 
-        apiKeyError = ""
-        baseURLError = ""
+        zhipuAPIKeyError = ""
+        openAIAPIKeyError = ""
         settings.save(
             language1ID: language1ID,
             language2ID: language2ID,
-            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
-            audioFormatID: audioFormatID
+            zhipuAPIKey: zhipuAPIKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            openAIAPIKey: openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         saveMessage = "Saved."
     }

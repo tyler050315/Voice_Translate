@@ -14,7 +14,6 @@ final class AudioMonitor: ObservableObject {
     private let engine = AVAudioEngine()
     private var maxDurationTask: Task<Void, Never>?
     private var recordingFile: AVAudioFile?
-    private var recordingConverter: AVAudioConverter?
     private var recordingURL: URL?
     private var recordingStartedAt: Date?
     private var translationContext: TranslationContext?
@@ -26,23 +25,18 @@ final class AudioMonitor: ObservableObject {
     private let farFieldVoiceThreshold: Float = 0.0065
     private let speechThresholdMultiplier: Float = 1.9
     private let maxRecordingDuration: Duration = .seconds(30)
-    private let recordingSampleRate = 16_000.0
-    private let recordingChannelCount: AVAudioChannelCount = 1
-    private let recordingBitRate = 32_000
 
     func updateTranslationSettings(
-        apiKey: String,
-        baseURL: String,
+        zhipuAPIKey: String,
+        openAIAPIKey: String,
         language1: TranslationLanguage,
-        language2: TranslationLanguage,
-        audioFormat: AudioRecordingFormat
+        language2: TranslationLanguage
     ) {
         translationContext = TranslationContext(
-            apiKey: apiKey,
-            baseURL: baseURL,
+            zhipuAPIKey: zhipuAPIKey,
+            openAIAPIKey: openAIAPIKey,
             language1: language1,
-            language2: language2,
-            audioFormat: audioFormat
+            language2: language2
         )
     }
 
@@ -101,7 +95,6 @@ final class AudioMonitor: ObservableObject {
         isVoiceDetected = false
         level = 0
         recordingFile = nil
-        recordingConverter = nil
         recordingURL = nil
         recordingStartedAt = nil
         resetVoiceDetectionState()
@@ -181,17 +174,9 @@ final class AudioMonitor: ObservableObject {
         guard !isRecording else { return }
 
         do {
-            let audioFormat = translationContext?.audioFormat ?? .m4aAAC
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("voice-utterance-\(Int(Date().timeIntervalSince1970)).\(audioFormat.fileExtension)")
-            let file = try makeRecordingFile(at: url, inputFormat: format, audioFormat: audioFormat)
-            recordingFile = file
-            if audioFormat.requiresConversion, !Self.canWriteBuffer(format, directlyTo: file.processingFormat) {
-                guard let converter = AVAudioConverter(from: format, to: file.processingFormat) else {
-                    throw NSError(domain: "AudioMonitor", code: 2)
-                }
-                recordingConverter = converter
-            }
+                .appendingPathComponent("voice-utterance-\(Int(Date().timeIntervalSince1970)).wav")
+            recordingFile = try AVAudioFile(forWriting: url, settings: format.settings)
             recordingURL = url
             recordingStartedAt = Date()
             lastSpeechAt = Date()
@@ -214,41 +199,10 @@ final class AudioMonitor: ObservableObject {
         guard let recordingFile else { return }
 
         do {
-            if let recordingConverter {
-                guard let convertedBuffer = try Self.convert(buffer, with: recordingConverter, to: recordingFile.processingFormat) else {
-                    return
-                }
-                try recordingFile.write(from: convertedBuffer)
-            } else {
-                try recordingFile.write(from: buffer)
-            }
+            try recordingFile.write(from: buffer)
         } catch {
             statusText = "Could not write recording."
             stopListening()
-        }
-    }
-
-    private func makeRecordingFile(
-        at url: URL,
-        inputFormat: AVAudioFormat,
-        audioFormat: AudioRecordingFormat
-    ) throws -> AVAudioFile {
-        switch audioFormat {
-        case .m4aAAC:
-            let settings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: recordingSampleRate,
-                AVNumberOfChannelsKey: Int(recordingChannelCount),
-                AVEncoderBitRateKey: recordingBitRate
-            ]
-            return try AVAudioFile(
-                forWriting: url,
-                settings: settings,
-                commonFormat: .pcmFormatFloat32,
-                interleaved: false
-            )
-        case .wav:
-            return try AVAudioFile(forWriting: url, settings: inputFormat.settings)
         }
     }
 
@@ -266,7 +220,6 @@ final class AudioMonitor: ObservableObject {
         engine.stop()
         engine.reset()
         recordingFile = nil
-        recordingConverter = nil
         recordingURL = nil
         recordingStartedAt = nil
         lastSpeechAt = nil
@@ -326,7 +279,10 @@ final class AudioMonitor: ObservableObject {
         }
 
         do {
-            let service = try OpenAIService(apiKey: context.apiKey, baseURL: context.baseURL)
+            let service = AITranslationService(
+                zhipuAPIKey: context.zhipuAPIKey,
+                openAIAPIKey: context.openAIAPIKey
+            )
             let result = try await service.translateAudio(at: url, context: context)
             await MainActor.run {
                 completeTranslationResult(result)
@@ -421,47 +377,5 @@ final class AudioMonitor: ObservableObject {
         }
 
         return sqrt(sum / Float(frameLength))
-    }
-
-    nonisolated private static func canWriteBuffer(_ sourceFormat: AVAudioFormat, directlyTo destinationFormat: AVAudioFormat) -> Bool {
-        sourceFormat.sampleRate == destinationFormat.sampleRate
-            && sourceFormat.channelCount == destinationFormat.channelCount
-            && sourceFormat.commonFormat == destinationFormat.commonFormat
-            && sourceFormat.isInterleaved == destinationFormat.isInterleaved
-    }
-
-    nonisolated private static func convert(
-        _ buffer: AVAudioPCMBuffer,
-        with converter: AVAudioConverter,
-        to outputFormat: AVAudioFormat
-    ) throws -> AVAudioPCMBuffer? {
-        let sampleRateRatio = outputFormat.sampleRate / buffer.format.sampleRate
-        let outputFrameCapacity = max(1, AVAudioFrameCount(ceil(Double(buffer.frameLength) * sampleRateRatio)) + 32)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
-            throw NSError(domain: "AudioMonitor", code: 1)
-        }
-
-        var didProvideInput = false
-        var conversionError: NSError?
-        let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outputStatus in
-            if didProvideInput {
-                outputStatus.pointee = .noDataNow
-                return nil
-            }
-
-            didProvideInput = true
-            outputStatus.pointee = .haveData
-            return buffer
-        }
-
-        if let conversionError {
-            throw conversionError
-        }
-
-        guard status != .error, outputBuffer.frameLength > 0 else {
-            return nil
-        }
-
-        return outputBuffer
     }
 }
