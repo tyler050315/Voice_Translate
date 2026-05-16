@@ -10,6 +10,7 @@ final class AudioMonitor: ObservableObject {
     @Published private(set) var level: Float = 0
     @Published var statusText = "Tap the voice button to start."
     @Published var testResultText: String?
+    @Published private(set) var latestTranslation: TranslationResult?
 
     private let engine = AVAudioEngine()
     private var maxDurationTask: Task<Void, Never>?
@@ -120,6 +121,7 @@ final class AudioMonitor: ObservableObject {
             isListening = true
             isProcessing = false
             testResultText = nil
+            latestTranslation = nil
             resetVoiceDetectionState()
             statusText = "Listening for speech..."
         } catch {
@@ -302,6 +304,7 @@ final class AudioMonitor: ObservableObject {
     }
 
     private func completeTranslationResult(_ result: TranslationResult) {
+        latestTranslation = result
         testResultText = """
         \(result.translatedText)
 
@@ -317,6 +320,7 @@ final class AudioMonitor: ObservableObject {
 
     private func completeErrorResult(_ error: Error) {
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        latestTranslation = nil
         testResultText = """
         Translation failed
 

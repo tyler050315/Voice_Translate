@@ -1,4 +1,5 @@
 import Combine
+import AVFoundation
 import Foundation
 import SwiftUI
 
@@ -26,7 +27,10 @@ struct ContentView: View {
 private struct MainView: View {
     @ObservedObject var settings: AppSettings
     @StateObject private var audioMonitor = AudioMonitor()
+    @StateObject private var speechPlayer = LocalSpeechPlayer()
     @State private var translatedText = "Translation text will appear here after speech is processed."
+    @State private var speechText = ""
+    @State private var speechLanguageID = ""
 
     var body: some View {
         VStack(spacing: 12) {
@@ -44,6 +48,7 @@ private struct MainView: View {
                 .frame(height: 18)
 
             Button {
+                speechPlayer.stop()
                 audioMonitor.updateTranslationSettings(
                     zhipuAPIKey: settings.zhipuAPIKey,
                     language1: settings.language1,
@@ -74,6 +79,16 @@ private struct MainView: View {
         }
         .onReceive(audioMonitor.$testResultText.compactMap { $0 }) { result in
             translatedText = result
+        }
+        .onReceive(audioMonitor.$latestTranslation) { result in
+            if let result {
+                speechText = result.translatedText
+                speechLanguageID = result.targetLanguageID
+            } else {
+                speechPlayer.stop()
+                speechText = ""
+                speechLanguageID = ""
+            }
         }
     }
 
@@ -132,12 +147,33 @@ private struct MainView: View {
     }
 
     private var translatedTextBox: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            Text(translatedText)
-                .font(.title2)
-                .lineSpacing(6)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(18)
+        ZStack(alignment: .bottomTrailing) {
+            ScrollView(.vertical, showsIndicators: false) {
+                Text(translatedText)
+                    .font(.title2)
+                    .lineSpacing(6)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(18)
+                    .padding(.bottom, hasSpeechText ? 54 : 0)
+            }
+
+            if hasSpeechText {
+                Button {
+                    if speechPlayer.isSpeaking {
+                        speechPlayer.stop()
+                    } else {
+                        speechPlayer.speak(speechText, languageID: speechLanguageID)
+                    }
+                } label: {
+                    Image(systemName: speechPlayer.isSpeaking ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .clipShape(Circle())
+                .padding(14)
+                .accessibilityLabel(speechPlayer.isSpeaking ? "Stop speaking translation" : "Speak translation")
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
         .background(Color(.systemBackground))
@@ -147,6 +183,10 @@ private struct MainView: View {
                 .stroke(Color(.separator), lineWidth: 0.5)
         }
         .layoutPriority(1)
+    }
+
+    private var hasSpeechText: Bool {
+        !speechText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var microphoneIndicator: some View {
@@ -275,5 +315,73 @@ private enum NetworkPermissionPrimer {
         request.httpMethod = "HEAD"
 
         URLSession.shared.dataTask(with: request).resume()
+    }
+}
+
+@MainActor
+private final class LocalSpeechPlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    @Published private(set) var isSpeaking = false
+
+    private let synthesizer = AVSpeechSynthesizer()
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func speak(_ text: String, languageID: String) {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+
+        stop()
+        configureAudioSession()
+
+        let utterance = AVSpeechUtterance(string: trimmedText)
+        utterance.voice = Self.voice(for: languageID)
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.pitchMultiplier = 1
+        utterance.volume = 1
+        synthesizer.speak(utterance)
+        isSpeaking = true
+    }
+
+    func stop() {
+        guard synthesizer.isSpeaking || synthesizer.isPaused else { return }
+        synthesizer.stopSpeaking(at: .immediate)
+        isSpeaking = false
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isSpeaking = false
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isSpeaking = false
+        }
+    }
+
+    private static func voice(for languageID: String) -> AVSpeechSynthesisVoice? {
+        if let exactVoice = AVSpeechSynthesisVoice(language: languageID) {
+            return exactVoice
+        }
+
+        let languagePrefix = languageID.split(separator: "-").first.map(String.init)
+        return AVSpeechSynthesisVoice.speechVoices().first { voice in
+            guard let languagePrefix else { return false }
+            return voice.language.hasPrefix(languagePrefix)
+        }
+    }
+
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+        } catch {
+            // Speech can still work with the current audio session; keep playback best-effort.
+        }
     }
 }

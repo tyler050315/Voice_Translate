@@ -10,6 +10,7 @@ struct TranslationResult {
     let transcript: String
     let sourceLanguage: String
     let targetLanguage: String
+    let targetLanguageID: String
     let translatedText: String
 }
 
@@ -119,6 +120,7 @@ final class AITranslationService {
 
         Decide whether the transcript is closer to language1 or language2, then translate it into the other language.
         Return only compact JSON with keys: source_language, target_language, translation.
+        For source_language and target_language, use exactly one configured language id such as \(context.language1.id) or \(context.language2.id).
         """
 
         let payload = ChatCompletionRequest(
@@ -141,12 +143,38 @@ final class AITranslationService {
         }
 
         let translated = try JSONDecoder().decode(TranslationPayload.self, from: content)
+        let targetLanguageID = Self.languageID(for: translated.targetLanguage, context: context)
         return TranslationResult(
             transcript: transcript,
             sourceLanguage: translated.sourceLanguage,
             targetLanguage: translated.targetLanguage,
+            targetLanguageID: targetLanguageID,
             translatedText: translated.translation
         )
+    }
+
+    private static func languageID(for value: String, context: TranslationContext) -> String {
+        let normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let language1Matches = [
+            context.language1.id.lowercased(),
+            context.language1.name.lowercased(),
+            context.language1.displayName.lowercased()
+        ]
+        let language2Matches = [
+            context.language2.id.lowercased(),
+            context.language2.name.lowercased(),
+            context.language2.displayName.lowercased()
+        ]
+
+        if language1Matches.contains(normalizedValue) {
+            return context.language1.id
+        }
+
+        if language2Matches.contains(normalizedValue) {
+            return context.language2.id
+        }
+
+        return context.language2.id
     }
 
     private func send(_ request: URLRequest, provider: String) async throws -> Data {
